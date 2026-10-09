@@ -709,7 +709,7 @@ mod postgres_tests {
         let mut migrations: Vec<_> = MIGRATOR.iter().collect();
         migrations.sort_by_key(|migration| migration.version);
 
-        assert_eq!(migrations.len(), 66);
+        assert_eq!(migrations.len(), 67);
         assert_eq!(migrations[64].version, 65);
         let retire_ttl = strip_sql_comments(migrations[64].sql.as_str());
         for statement in [
@@ -722,6 +722,14 @@ mod postgres_tests {
         let desired_schema = crate::test_support::desired_state_schema_sql();
         assert!(!desired_schema.contains("events_refresh_channel_ttl"));
         assert!(!desired_schema.contains("refresh_channel_ttl_after_event_insert"));
+        assert_eq!(migrations[65].version, 66);
+        assert!(migrations[65]
+            .sql
+            .as_str()
+            .contains("CREATE TABLE community_nip_fi_issuers"));
+        assert!(migrations
+            .iter()
+            .any(|migration| migration.sql.as_str().contains("ADD COLUMN revoked_at")));
         assert_eq!(migrations[58].version, 59);
         assert!(migrations[58].sql.as_str().contains("buzz.push_enabled"));
         assert_eq!(migrations[59].version, 60);
