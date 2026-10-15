@@ -234,7 +234,7 @@ BEGIN
 END $$;
 
 -- Invitation revocation is historical DML; pgschema does not execute it.
--- Use the same tenant-fenced, idempotent repair as migration0061.
+-- Use the same tenant-fenced, idempotent repair as migration 0065.
 SELECT backfill_invite_revocations();
 DO $$
 BEGIN
