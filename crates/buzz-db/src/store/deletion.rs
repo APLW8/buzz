@@ -3362,10 +3362,10 @@ pub(crate) async fn lock_community_deletion_shared(
     )
     .await?;
     if isolation != "read committed" {
-        tracing::error!(%isolation, %community, "community write admission requires read committed isolation");
+        tracing::error!(%isolation, %community, "deletion-lock admission requires read committed isolation");
         // AccessDenied deliberately refuses writes; the log distinguishes config errors from fences.
         return Err(DbError::AccessDenied(format!(
-            "community write admission requires read committed isolation, got {isolation}"
+            "deletion-lock admission requires read committed isolation, got {isolation}"
         )));
     }
     Ok(())
