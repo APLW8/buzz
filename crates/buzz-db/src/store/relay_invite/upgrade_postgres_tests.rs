@@ -171,7 +171,8 @@ async fn legacy_fixture() -> (PgPool, Vec<LegacyInviteCase>) {
     let pool = PgPool::connect(&crate::test_support::database_url())
         .await
         .unwrap();
-    crate::migration::run_migrations_through(&pool, 65)
+    // Pinned main ends at migration 0066, so 0067 is the first candidate migration.
+    crate::migration::run_migrations_through(&pool, 66)
         .await
         .unwrap();
     let last_migration: i64 =
@@ -180,8 +181,8 @@ async fn legacy_fixture() -> (PgPool, Vec<LegacyInviteCase>) {
             .await
             .unwrap();
     assert_eq!(
-        last_migration, 65,
-        "fixtures start at the pinned base schema"
+        last_migration, 66,
+        "fixtures start at the complete pinned-main schema"
     );
 
     let issuer = [1u8; 32];
@@ -206,9 +207,8 @@ async fn legacy_fixture() -> (PgPool, Vec<LegacyInviteCase>) {
                     .execute(&pool)
                     .await
                     .unwrap();
-                // Seed the owner link in the pre-0067 schema. The current
-                // writer also takes invite_admission_lock(), which this
-                // migrated-through-65 database does not have yet.
+                // Seed the owner link before candidate migration 0067 installs
+                // invite_admission_lock(), which the current writer takes.
                 sqlx::query(
                     "UPDATE users SET agent_owner_pubkey = $1 \
                      WHERE community_id = $2 AND pubkey = $3",
@@ -509,8 +509,8 @@ async fn migration_schema_desired_pgschema_reconcile_matches_populated_upgrade()
         .unwrap();
     assert_eq!(before, cases.len() as i64);
 
-    // Exercise the deployment path against the populated database already
-    // migrated through 0065, rather than reproducing its DDL by hand.
+    // Exercise the deployment path against populated data at the complete
+    // pinned-main schema through 0066, rather than reproducing its DDL by hand.
     apply_pgschema_to_existing_database(&pool).await;
     assert_admission_column(&pool).await;
     let before_reconcile: i64 =
