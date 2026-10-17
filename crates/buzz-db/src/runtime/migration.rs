@@ -722,14 +722,25 @@ mod postgres_tests {
         let desired_schema = crate::test_support::desired_state_schema_sql();
         assert!(!desired_schema.contains("events_refresh_channel_ttl"));
         assert!(!desired_schema.contains("refresh_channel_ttl_after_event_insert"));
+        assert!(desired_schema.contains("legacy_admission BOOLEAN NOT NULL DEFAULT true"));
         assert_eq!(migrations[65].version, 66);
         assert!(migrations[65]
             .sql
             .as_str()
             .contains("CREATE TABLE community_nip_fi_issuers"));
-        assert!(migrations
-            .iter()
-            .any(|migration| migration.sql.as_str().contains("ADD COLUMN revoked_at")));
+        assert_eq!(migrations[66].version, 67);
+        assert!(migrations[66]
+            .sql
+            .as_str()
+            .contains("ADD COLUMN legacy_admission BOOLEAN NOT NULL DEFAULT true"));
+        for function in [
+            include_str!("../../../../schema/functions/invite_admission_lock.sql"),
+            include_str!("../../../../schema/functions/backfill_invite_revocations.sql"),
+        ] {
+            let normalized = normalize_sql(function);
+            assert!(normalize_sql(migrations[66].sql.as_str()).contains(&normalized));
+            assert!(normalize_sql(&desired_schema).contains(&normalized));
+        }
         assert_eq!(migrations[58].version, 59);
         assert!(migrations[58].sql.as_str().contains("buzz.push_enabled"));
         assert_eq!(migrations[59].version, 60);
@@ -749,11 +760,6 @@ mod postgres_tests {
             .sql
             .as_str()
             .contains("CREATE FUNCTION profile_name_fields"));
-        assert_eq!(migrations[65].version, 66);
-        assert!(migrations[65]
-            .sql
-            .as_str()
-            .contains("CREATE TABLE community_nip_fi_issuers"));
         assert_eq!(migrations[55].version, 56);
         assert!(migrations[55]
             .sql

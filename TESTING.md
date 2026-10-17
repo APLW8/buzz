@@ -151,6 +151,12 @@ the same machine.
 New invitations are durable v2 bearers. A community ban permanently revokes
 outstanding v2 invitations issued by that principal or its recorded agents.
 Unban does not restore them; an unrestricted issuer can mint new invitations.
+Existing durable rows default to legacy admission. Historical repair revokes a
+legacy row when any retained `community_bans` row exists for its canonical
+issuer or currently recorded owner, regardless of whether the restriction is
+active or whether the invite was created before it. New mints explicitly mark
+their rows as protocol-native; active bans still revoke those rows. Audit and
+action records alone do not establish enforcement.
 An issuer or verified owner timeout also blocks claims on existing invitations
 while it lasts, without durable revocation. Claims resume after timeout expiry.
 Claim credentials are verified without user writes. Successful claims commit
@@ -175,6 +181,13 @@ unchanged. Invalid or empty values fail configuration. Apply the same setting to
 all serving pods and retain it on compatible rollbacks; rolling back to a version
 without this setting's enforcement restores legacy acceptance until natural expiry.
 This change does not choose or deploy a cutoff.
+
+Before applying the invitation migration, operators must reconcile any
+previously applied invitation migration version. Legacy owner attribution uses
+the agent's currently recorded `agent_owner_pubkey`; deleting an owner user row
+out of band clears that link through its foreign key, so a later repair cannot
+recover the former relationship. Reconcile before any external user-row
+cleanup that could erase this provenance.
 
 ### 4. Smoke test the CLI against the relay
 
@@ -220,7 +233,7 @@ relay key for authoritative replacement:
 
 ```bash
 export PATH="$PWD/target/release:$PATH"
-export DATABASE_URL="postgres://buzz:buzz_dev@localhost:5432/buzz_roster_e2e"
+export DATABASE_URL="${DATABASE_URL:?set an isolated local PostgreSQL URL}"
 export BUZZ_RELAY_URL="http://localhost:3030"  # match the relay from step 3
 export RELAY_URL="ws://localhost:3030"
 export BUZZ_RELAY_PRIVATE_KEY="<same key used by buzz-relay>"
@@ -361,7 +374,7 @@ out of the box with `just setup` or `just relay`. Common overrides:
 | `BUZZ_HEALTH_PORT`              | `8080`                      | `/_liveness`, `/_readiness` |
 | `BUZZ_METRICS_PORT`             | `9102`                      | Prometheus `/metrics` |
 | `RELAY_URL`                       | `ws://localhost:3000`       | Advertised in NIP-11 / NIP-42 challenges. **Note: no `BUZZ_` prefix.** |
-| `DATABASE_URL`                    | `postgres://buzz:buzz_dev@localhost:5432/buzz` | |
+| `DATABASE_URL`                    | Local PostgreSQL database `buzz` (development default) | |
 | `REDIS_URL`                       | `redis://localhost:6379`    | |
 | `BUZZ_REQUIRE_AUTH_TOKEN`       | `false`                     | When true, REST requires NIP-98 (no `X-Pubkey` fallback) |
 | `BUZZ_REQUIRE_RELAY_MEMBERSHIP` | `false`                     | When true, only pubkeys in `relay_members` can connect |

@@ -186,6 +186,231 @@ async fn issuer_agent_revocation_survives_owner_unban() {
     );
 }
 
+#[tokio::test]
+#[ignore = "requires Postgres"]
+async fn stalled_production_mint_ignores_lifted_history_and_later_audit_touches() {
+    let (pool, community, issuer, claimant) = fixture().await;
+    let issuer_bytes = [1u8; 32];
+    sqlx::query(
+        "INSERT INTO community_bans (community_id, pubkey, banned, actor_pubkey) \
+         VALUES ($1, $2, false, $3)",
+    )
+    .bind(community.as_uuid())
+    .bind(issuer_bytes.as_slice())
+    .bind([3u8; 32].as_slice())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let old_action = Uuid::new_v4();
+    let old_action_time = Utc::now() - chrono::Duration::days(1);
+    sqlx::query(
+        "INSERT INTO relay_admin_actions \
+         (id, report_community_id, request_id, actor_pubkey, actor_role, action, \
+          state, step_marker, enforcement_target_pubkey, created_at, updated_at) \
+         VALUES ($1, $2, $3, $4, 'operator', 'ban', 'succeeded', \
+                 'mutation_committed', $5, $6, $6)",
+    )
+    .bind(old_action)
+    .bind(community.as_uuid())
+    .bind(Uuid::new_v4())
+    .bind([3u8; 32].as_slice())
+    .bind(issuer_bytes.as_slice())
+    .bind(old_action_time)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Hold the production admission seam so mint starts its transaction and
+    // stalls before insert. Touching the old action while it waits creates the
+    // timestamp ordering that the retired audit predicate misread as proof.
+    let mut admission = pool.begin().await.unwrap();
+    lock_admission(&mut admission, community).await.unwrap();
+    let (mint_pool, mint_name) = named_pool().await;
+    let mint_issuer = issuer.clone();
+    let mint = tokio::spawn(async move {
+        mint_relay_invite(&mint_pool, community, &mint_issuer, 3600, None).await
+    });
+    wait_for_lock(&pool, &mint_name, "advisory", &mint).await;
+
+    sqlx::query(
+        "UPDATE relay_admin_actions \
+         SET updated_at=clock_timestamp()+interval '1 minute' WHERE id=$1",
+    )
+    .bind(old_action)
+    .execute(&pool)
+    .await
+    .unwrap();
+    admission.commit().await.unwrap();
+
+    let invite = tokio::time::timeout(std::time::Duration::from_secs(5), mint)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let marker: bool = sqlx::query_scalar(
+        "SELECT legacy_admission FROM relay_invites WHERE community_id=$1 AND id=$2",
+    )
+    .bind(community.as_uuid())
+    .bind(invite.invite_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(
+        !marker,
+        "the production mint seam marks protocol-native rows"
+    );
+
+    let old_action_touched_after_mint_started: bool = sqlx::query_scalar(
+        "SELECT a.updated_at >= i.created_at \
+         FROM relay_admin_actions a CROSS JOIN relay_invites i \
+         WHERE a.id=$1 AND i.community_id=$2 AND i.id=$3",
+    )
+    .bind(old_action)
+    .bind(community.as_uuid())
+    .bind(invite.invite_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(
+        old_action_touched_after_mint_started,
+        "the mint transaction began before the old action timestamp was touched"
+    );
+    for action in ["ban", "resolve:ban"] {
+        sqlx::query(
+            "INSERT INTO moderation_actions \
+             (community_id, actor_pubkey, action, target_pubkey, created_at) \
+             VALUES ($1, $2, $3, $4, clock_timestamp()+interval '1 minute')",
+        )
+        .bind(community.as_uuid())
+        .bind([2u8; 32].as_slice())
+        .bind(action)
+        .bind(issuer_bytes.as_slice())
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT backfill_invite_revocations()")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        0,
+        "lifted restrictions and later audit writes do not revoke a new row"
+    );
+    assert!(matches!(
+        claim_relay_invite(
+            &pool,
+            community,
+            &hash_v2_code(&invite.code),
+            &claimant,
+            None
+        )
+        .await
+        .unwrap(),
+        ClaimOutcome::Joined { .. }
+    ));
+}
+
+#[tokio::test]
+#[ignore = "requires Postgres"]
+async fn historical_backfill_still_revokes_new_protocol_rows_for_active_bans() {
+    let (pool, community, issuer, claimant) = fixture().await;
+    let invite = mint_relay_invite(&pool, community, &issuer, 3600, None)
+        .await
+        .unwrap();
+    let legacy_admission: bool = sqlx::query_scalar(
+        "SELECT legacy_admission FROM relay_invites WHERE community_id=$1 AND id=$2",
+    )
+    .bind(community.as_uuid())
+    .bind(invite.invite_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(!legacy_admission);
+    sqlx::query(
+        "INSERT INTO community_bans (community_id, pubkey, banned, actor_pubkey) \
+         VALUES ($1, $2, true, $3)",
+    )
+    .bind(community.as_uuid())
+    .bind([1u8; 32].as_slice())
+    .bind([3u8; 32].as_slice())
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT backfill_invite_revocations()")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        1,
+        "active restriction repair applies to new-protocol rows"
+    );
+    assert_eq!(
+        claim_relay_invite(
+            &pool,
+            community,
+            &hash_v2_code(&invite.code),
+            &claimant,
+            None
+        )
+        .await
+        .unwrap(),
+        ClaimOutcome::Revoked
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires Postgres"]
+async fn malformed_legacy_issuers_return_a_typed_revoked_claim() {
+    let (pool, community, _, claimant) = fixture().await;
+    let issuers = [
+        "not-a-pubkey".to_owned(),
+        hex::encode([0xabu8; 32]).to_ascii_uppercase(),
+    ];
+    for (index, issuer) in issuers.iter().enumerate() {
+        let token_hash = [index as u8 + 10; 32];
+        sqlx::query(
+            "INSERT INTO relay_invites (community_id, token_hash, created_by, expires_at) \
+             VALUES ($1, $2, $3, clock_timestamp()+interval '1 day')",
+        )
+        .bind(community.as_uuid())
+        .bind(token_hash.as_slice())
+        .bind(issuer)
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            claim_relay_invite(&pool, community, &token_hash, &claimant, None)
+                .await
+                .unwrap(),
+            ClaimOutcome::Revoked,
+            "issuer {issuer} must fail closed without a database error"
+        );
+    }
+
+    let token_hash = [99u8; 32];
+    sqlx::query(
+        "INSERT INTO relay_invites \
+         (community_id, token_hash, created_by, expires_at, legacy_admission) \
+         VALUES ($1, $2, 'not-a-pubkey', clock_timestamp()+interval '1 day', false)",
+    )
+    .bind(community.as_uuid())
+    .bind(token_hash.as_slice())
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        claim_relay_invite(&pool, community, &token_hash, &claimant, None)
+            .await
+            .unwrap(),
+        ClaimOutcome::Invalid,
+        "a malformed non-legacy issuer returns a clean invalid outcome"
+    );
+}
+
 pub(super) async fn named_pool() -> (PgPool, String) {
     let name = format!("invite-race-{}", Uuid::new_v4());
     let connection_name = name.clone();

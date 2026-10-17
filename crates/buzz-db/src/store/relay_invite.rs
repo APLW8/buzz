@@ -123,6 +123,13 @@ fn validate_mint_inputs(ttl_secs: u64, max_uses: Option<i32>) -> Result<()> {
     Ok(())
 }
 
+fn is_canonical_invite_pubkey(pubkey: &str) -> bool {
+    pubkey.len() == 64
+        && pubkey
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
 /// Mint a v2 invite: generate a 32-byte random secret, hash it, persist the
 /// row, and return the plaintext code plus metadata.
 ///
@@ -136,6 +143,11 @@ pub async fn mint_relay_invite(
     max_uses: Option<i32>,
 ) -> Result<MintedInvite> {
     validate_mint_inputs(ttl_secs, max_uses)?;
+    if !is_canonical_invite_pubkey(created_by) {
+        return Err(crate::error::DbError::InvalidData(
+            "invalid invitation issuer".into(),
+        ));
+    }
 
     // Generate 32 random bytes and encode as base64url — this is the secret.
     let secret: [u8; V2_SECRET_LEN] = rand::random();
@@ -159,8 +171,9 @@ pub async fn mint_relay_invite(
         return Err(crate::DbError::InviteRestricted);
     }
     let row = sqlx::query(
-        "INSERT INTO relay_invites (community_id, token_hash, max_uses, expires_at, created_by) \
-         VALUES ($1, $2, $3, $4, $5) \
+        "INSERT INTO relay_invites \
+         (community_id, token_hash, max_uses, expires_at, created_by, legacy_admission) \
+         VALUES ($1, $2, $3, $4, $5, false) \
          RETURNING id",
     )
     .bind(community.as_uuid())
@@ -202,13 +215,13 @@ pub(crate) async fn principal_restricted(
     community: CommunityId,
     pubkey: &str,
 ) -> Result<bool> {
-    let bytes = hex::decode(pubkey)
-        .map_err(|_| crate::DbError::InvalidData("invalid invitation principal".into()))?;
-    if bytes.len() != 32 {
+    if !is_canonical_invite_pubkey(pubkey) {
         return Err(crate::DbError::InvalidData(
             "invalid invitation principal".into(),
         ));
     }
+    let bytes = hex::decode(pubkey)
+        .map_err(|_| crate::DbError::InvalidData("invalid invitation principal".into()))?;
     Ok(sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM community_bans \
          WHERE community_id = $1 AND pubkey IN (\
@@ -372,7 +385,7 @@ pub async fn claim_relay_invite_with_owner(
 
     // 2. SELECT FOR UPDATE — lock the invite row for the duration of this txn.
     let row = sqlx::query(
-        "SELECT id, max_uses, use_count, expires_at, created_by, revoked_at \
+        "SELECT id, max_uses, use_count, expires_at, created_by, revoked_at, legacy_admission \
          FROM relay_invites \
          WHERE community_id = $1 AND token_hash = $2 \
          FOR UPDATE",
@@ -411,8 +424,12 @@ pub async fn claim_relay_invite_with_owner(
 
     let revoked_at: Option<DateTime<Utc>> = invite.try_get("revoked_at")?;
     let issuer: String = invite.try_get("created_by")?;
-    let denial = if revoked_at.is_some() {
+    let legacy_admission: bool = invite.try_get("legacy_admission")?;
+    let canonical_issuer = is_canonical_invite_pubkey(&issuer);
+    let denial = if revoked_at.is_some() || (legacy_admission && !canonical_issuer) {
         Some((ClaimOutcome::Revoked, "revoked"))
+    } else if !canonical_issuer {
+        Some((ClaimOutcome::Invalid, "invalid"))
     } else if principal_restricted(tx.conn(), community, &issuer).await? {
         Some((ClaimOutcome::IssuerRestricted, "issuer_restricted"))
     } else {
