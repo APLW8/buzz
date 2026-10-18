@@ -100,14 +100,14 @@ final class NotificationService: UNNotificationServiceExtension {
     withContentHandler contentHandler: @escaping (UNNotificationContent) -> Void
   ) {
     resolvedScope = nil
-    handoff = BuzzNotificationSound.makeHandoff(
-      originalSound: request.content.sound, contentHandler: contentHandler
-    )
+    handoff = BuzzNotificationHandoff(handler: contentHandler)
     restrictedFallbackContent = Self.restrictedFallback(from: request.content)
     guard let content = request.content.mutableCopy() as? UNMutableNotificationContent else {
       finish(request.content)
       return
     }
+    // Workaround until https://github.com/block/buzz/pull/8431 lands.
+    if content.sound == nil { content.sound = .default }
     bestAttemptContent = content
     var cleanUserInfo = content.userInfo
     cleanUserInfo.removeValue(forKey: BuzzPushNavigationTarget.userInfoKey)
