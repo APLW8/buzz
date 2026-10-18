@@ -100,7 +100,10 @@ final class NotificationService: UNNotificationServiceExtension {
     withContentHandler contentHandler: @escaping (UNNotificationContent) -> Void
   ) {
     resolvedScope = nil
-    handoff = BuzzNotificationHandoff(handler: contentHandler)
+    let originalSound = request.content.sound
+    handoff = BuzzNotificationHandoff { content in
+      contentHandler(BuzzNotificationSound.preparing(content, originalSound: originalSound))
+    }
     restrictedFallbackContent = Self.restrictedFallback(from: request.content)
     guard let content = request.content.mutableCopy() as? UNMutableNotificationContent else {
       finish(request.content)
