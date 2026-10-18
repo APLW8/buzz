@@ -39,8 +39,8 @@ struct BuzzNotificationSoundTests {
   func `Final handoff applies sound to resolved and restricted content once`(allowed: Bool) {
     var delivered: [UNNotificationContent] = []
     let original = UNMutableNotificationContent()
-    let handoff = BuzzNotificationHandoff<UNNotificationContent> { content in
-      delivered.append(BuzzNotificationSound.preparing(content, originalSound: original.sound))
+    let handoff = BuzzNotificationSound.makeHandoff(originalSound: original.sound) { content in
+      delivered.append(content)
     }
     let resolved = UNMutableNotificationContent()
     resolved.title = "Sender"
@@ -64,8 +64,8 @@ struct BuzzNotificationSoundTests {
 
   @Test func `Expiration receives sound before a late resolution is ignored`() {
     var delivered: [UNNotificationContent] = []
-    let handoff = BuzzNotificationHandoff<UNNotificationContent> { content in
-      delivered.append(BuzzNotificationSound.preparing(content, originalSound: nil))
+    let handoff = BuzzNotificationSound.makeHandoff(originalSound: nil) { content in
+      delivered.append(content)
     }
     for body in ["Reconnect to your relay now", "Resolved message"] {
       let content = UNMutableNotificationContent()
