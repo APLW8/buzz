@@ -9,6 +9,37 @@ void main() {
   const channelB = '123e4567-e89b-42d3-a456-426614174001';
 
   test(
+    'authored replies opt in without enumerating roots and honor all mutes',
+    () {
+      final subscriptions = buildDesiredBuzzPushSubscriptions(
+        myPubkey: me,
+        authoredThreadReplies: true,
+        authoredThreadRepliesSince: 1000,
+        mutedChannelIds: [channelA],
+      );
+      final rule = subscriptions.singleWhere(
+        (s) => s.filter.authoredThreadReplies,
+      );
+      expect(rule.filter.eTags, isNull);
+      expect(rule.filter.since, 1000);
+      expect(rule.ignore.first.authors, [me]);
+      expect(rule.ignore.last.hTags, [channelA]);
+      expect(rule.ignore.last.kinds, buzzPushEligibleKinds);
+      expect(rule.suppress!.pTagsMax, buzzPushHellthreadParticipantLimit);
+      expect(
+        BuzzPushSubscription.fromJson(rule.toJson()).toJson(),
+        rule.toJson(),
+      );
+      expect(
+        buildDesiredBuzzPushSubscriptions(
+          myPubkey: me,
+        ).any((s) => s.filter.authoredThreadReplies),
+        isFalse,
+      );
+    },
+  );
+
+  test(
     'desired subscription state round-trips with an accepted-state seam',
     () {
       final subscriptions = buildDesiredBuzzPushSubscriptions(

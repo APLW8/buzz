@@ -135,8 +135,40 @@ public final class BuzzPushNotificationResolver: BuzzPushNotificationResolving {
     return key
   }
 
+  // Keep relational queries separate from ordinary filters. Their authorized
+  // response carries the relay's root-authorship decision; a response to an
+  // ordinary mention/DM query must never satisfy that relational policy.
   private func query(
     _ community: PushLeaseCommunity,
+    completion: @escaping ((VerifiedNostrEvent, PushLeaseCommunity)?) -> Void
+  ) {
+    let groups = [false, true].map { authored in
+      community.policies.filter { ($0.filter.authoredThreadReplies == true) == authored }
+    }.filter { !$0.isEmpty }
+    let group = DispatchGroup()
+    let lock = NSLock()
+    var candidates: [(VerifiedNostrEvent, PushLeaseCommunity)] = []
+    for policies in groups {
+      group.enter()
+      queryPolicies(community, policies: policies) { candidate in
+        if let candidate {
+          lock.lock()
+          candidates.append(candidate)
+          lock.unlock()
+        }
+        group.leave()
+      }
+    }
+    group.notify(queue: .global(qos: .userInitiated)) {
+      completion(candidates.max {
+        $0.0.createdAt == $1.0.createdAt ? $0.0.id > $1.0.id : $0.0.createdAt < $1.0.createdAt
+      })
+    }
+  }
+
+  private func queryPolicies(
+    _ community: PushLeaseCommunity,
+    policies: [PushResolutionPolicy],
     completion: @escaping ((VerifiedNostrEvent, PushLeaseCommunity)?) -> Void
   ) {
     guard let privateKey = accountPrivateKey(for: community), community.pubkey?.isEmpty == false else {
@@ -144,11 +176,11 @@ public final class BuzzPushNotificationResolver: BuzzPushNotificationResolving {
       return
     }
     guard
-      !community.policies.isEmpty,
+      !policies.isEmpty,
       let relayURL = community.relayURL,
       let url = URL(string: "/query", relativeTo: relayURL),
       let body = try? JSONSerialization.data(
-        withJSONObject: community.policies.map { $0.filter.queryFilter(since: nil, limit: 10) }
+        withJSONObject: policies.map { $0.filter.queryFilter(since: nil, limit: 10) }
       )
     else {
       completion(nil)
@@ -176,11 +208,19 @@ public final class BuzzPushNotificationResolver: BuzzPushNotificationResolving {
         completion(nil)
         return
       }
+      let authoredQuery = policies.allSatisfy { $0.filter.authoredThreadReplies == true }
+      // Older relays silently discard unknown filter members. Require an
+      // explicit response capability before trusting relational selection.
+      if authoredQuery && response.value(forHTTPHeaderField: "x-buzz-query-extensions") != "buzz-authored-thread-replies-v1" {
+        completion(nil)
+        return
+      }
       let candidate = Self.newestMessage(
         events: events.filter { event in
           event.hasValidIDAndSignature()
-            && community.policies.contains { policy in
-              PushLeaseMatcher.matches(event: event, policy: policy)
+            && policies.contains { policy in
+              PushLeaseMatcher.matches(event: event, policy: policy,
+                authoredThreadQuery: authoredQuery)
             }
         },
         community: community
