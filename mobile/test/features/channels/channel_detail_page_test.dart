@@ -31,6 +31,7 @@ import 'package:flutter/rendering.dart'
         SemanticsNode;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:leak_tracker/leak_tracker.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart' as http_testing;
@@ -99,6 +100,7 @@ part 'channel_detail_page_test/presence_tests.dart';
 part 'channel_detail_page_test/action_row_tests.dart';
 part 'channel_detail_page_test/bubble_tests.dart';
 part 'channel_detail_page_test/review_avatar_tests.dart';
+part 'channel_detail_page_test/retention_tests.dart';
 
 const _channelId = '11111111-2222-4333-8444-555555555555';
 const _huddleChannelId = '8d764100-fd8f-44cf-9c98-6d8fbd739b8c';
@@ -573,6 +575,7 @@ void main() {
   actionRowTests();
   bubbleLayoutTests();
   reviewAvatarTests();
+  channelRetentionTests();
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
     _testPrefs = await SharedPreferences.getInstance();
@@ -4554,12 +4557,22 @@ void main() {
     });
 
     for (final gesture in ['status bar', 'scroll']) {
-      testWidgets(
-        'Me history uses selected provider for $gesture',
-        (tester) async {
-          final notifier = _FakeMessagesNotifier(
+      testWidgets('Me history uses selected provider for $gesture', (
+        tester,
+      ) async {
+        final notifier = _FakeMessagesNotifier(
+          [
+            for (var i = 50; i < 250; i++)
+              _textMsg(
+                id: 'msg$i',
+                pubkey: 'alice',
+                content: 'Message $i',
+                createdAt: 1000 + i,
+              ),
+          ],
+          olderPages: [
             [
-              for (var i = 50; i < 250; i++)
+              for (var i = 0; i < 50; i++)
                 _textMsg(
                   id: 'msg$i',
                   pubkey: 'alice',
@@ -4567,64 +4580,52 @@ void main() {
                   createdAt: 1000 + i,
                 ),
             ],
-            olderPages: [
-              [
-                for (var i = 0; i < 50; i++)
-                  _textMsg(
-                    id: 'msg$i',
-                    pubkey: 'alice',
-                    content: 'Message $i',
-                    createdAt: 1000 + i,
-                  ),
-              ],
-            ],
-          );
-          await tester.pumpWidget(
-            _buildTestable(
-              messages: const [],
-              messagesNotifier: notifier,
-              personalChat: true,
-              disableAnimations: true,
+          ],
+        );
+        await tester.pumpWidget(
+          _buildTestable(
+            messages: const [],
+            messagesNotifier: notifier,
+            personalChat: true,
+            disableAnimations: true,
+          ),
+        );
+        await tester.pumpAndSettle();
+        if (gesture == 'status bar') {
+          await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+            'flutter/status_bar',
+            const JSONMethodCodec().encodeMethodCall(
+              const MethodCall('handleScrollToTop'),
             ),
+            (_) {},
           );
           await tester.pumpAndSettle();
-          if (gesture == 'status bar') {
-            await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
-              'flutter/status_bar',
-              const JSONMethodCodec().encodeMethodCall(
-                const MethodCall('handleScrollToTop'),
-              ),
-              (_) {},
-            );
-            await tester.pumpAndSettle();
-          } else {
-            final list = tester.widget<ScrollablePositionedList>(
-              find.byType(ScrollablePositionedList),
-            );
-            list.itemScrollController!.jumpTo(index: 195);
-            await tester.pumpAndSettle();
-            await tester.drag(
-              find.byType(ScrollablePositionedList),
-              const Offset(0, 350),
-            );
-            await tester.pumpAndSettle();
-          }
-          expect(notifier.fetchOlderCalls, greaterThan(0));
-          if (gesture == 'status bar') {
-            expect(findRichText('Message 0'), findsOneWidget);
-          } else {
-            // Scroll pagination extends the visible provider, even if the user
-            // has not scrolled through every newly loaded row yet.
-            expect(
-              ProviderScope.containerOf(
-                tester.element(find.byType(ChannelDetailPage)),
-              ).read(meMessagesProvider(_channelId)).requireValue.first.id,
-              'msg0',
-            );
-          }
-        },
-        variant: TargetPlatformVariant.only(TargetPlatform.iOS),
-      );
+        } else {
+          final list = tester.widget<ScrollablePositionedList>(
+            find.byType(ScrollablePositionedList),
+          );
+          list.itemScrollController!.jumpTo(index: 195);
+          await tester.pumpAndSettle();
+          await tester.drag(
+            find.byType(ScrollablePositionedList),
+            const Offset(0, 350),
+          );
+          await tester.pumpAndSettle();
+        }
+        expect(notifier.fetchOlderCalls, greaterThan(0));
+        if (gesture == 'status bar') {
+          expect(findRichText('Message 0'), findsOneWidget);
+        } else {
+          // Scroll pagination extends the visible provider, even if the user
+          // has not scrolled through every newly loaded row yet.
+          expect(
+            ProviderScope.containerOf(
+              tester.element(find.byType(ChannelDetailPage)),
+            ).read(meMessagesProvider(_channelId)).requireValue.first.id,
+            'msg0',
+          );
+        }
+      }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
     }
 
     for (final personal in [false, true]) {
