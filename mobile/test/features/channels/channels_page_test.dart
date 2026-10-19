@@ -224,14 +224,61 @@ void main() {
       expect(find.byTooltip('Channels options'), findsOneWidget);
       await tester.tap(find.byTooltip('Channels options'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Filter'));
+      expect(find.text('general'), findsNothing);
+      final all = tester.widget<ChoiceChip>(
+        find.ancestor(of: find.text('All'), matching: find.byType(ChoiceChip)),
+      );
+      expect(all.onSelected, isNull);
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Show hidden channels · 1'));
       await tester.pumpAndSettle();
       expect(find.text('general'), findsOneWidget);
-      final all = tester.widget<ListTile>(
-        find.ancestor(of: find.text('All'), matching: find.byType(ListTile)),
-      );
-      expect(all.enabled, isFalse);
       expect(tester.widget<InkWell>(_dmTileFor('general')).onTap, isNotNull);
+      expect(manager.store.modeFor('channels'), ChannelFilterMode.unreads);
+      await tester.pumpWidget(const SizedBox());
+      manager.dispose();
+    },
+  );
+
+  testWidgets(
+    'section view stages choices until Apply and reopens saved duration',
+    (tester) async {
+      final manager = _filterTestManager()..ready = true;
+      await tester.pumpWidget(
+        buildTestable(
+          overrides: [
+            channelsProvider.overrideWith(() => _FakeNotifier(testChannels)),
+            channelFilterProvider.overrideWithValue(manager),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Channels options'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Active'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('7 days'));
+      await tester.pumpAndSettle();
+      expect(manager.store.modeFor('channels'), ChannelFilterMode.all);
+      await tester.tap(find.text('Apply'));
+      await tester.pumpAndSettle();
+      expect(manager.store.modeFor('channels'), ChannelFilterMode.active);
+      expect(manager.store.windowFor('channels'), 7 * 86400);
+      await tester.tap(find.byTooltip('Channels options'));
+      await tester.pumpAndSettle();
+      final days = tester.widget<ChoiceChip>(
+        find.ancestor(
+          of: find.text('7 days'),
+          matching: find.byType(ChoiceChip),
+        ),
+      );
+      expect(days.selected, isTrue);
+      await tester.tap(find.text('All'));
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(manager.store.modeFor('channels'), ChannelFilterMode.active);
+      expect(find.byType(AlertDialog), findsNothing);
       await tester.pumpWidget(const SizedBox());
       manager.dispose();
     },
@@ -257,9 +304,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Channels options'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Filter'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Active in the last'));
+      await tester.tap(find.text('Active'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('7 days'));
       await tester.pumpAndSettle();
@@ -268,12 +313,17 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         find.text(
-          'Could not confirm the save. Your selection is retained. Retry or Cancel.',
+          'Could not confirm the filter save. Your choices are kept; try again.',
         ),
         findsOneWidget,
       );
-      final selected = tester.widget<Text>(find.text('7 days'));
-      expect(selected.style?.fontWeight, FontWeight.bold);
+      final selected = tester.widget<ChoiceChip>(
+        find.ancestor(
+          of: find.text('7 days'),
+          matching: find.byType(ChoiceChip),
+        ),
+      );
+      expect(selected.selected, isTrue);
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
       expect(find.byType(AlertDialog), findsNothing);
@@ -415,20 +465,16 @@ void main() {
 
     await tester.tap(find.byTooltip('Channels options'));
     await tester.pumpAndSettle();
-    expect(find.text('Sort: Recent'), findsOneWidget);
-    expect(find.text('Sort: A–Z'), findsOneWidget);
-    final popover = find.byKey(const ValueKey('sort-popover-Channels'));
-    expect(popover, findsOneWidget);
-    expect(
-      find.descendant(of: popover, matching: find.byType(PopupMenuDivider)),
-      findsNothing,
+    expect(find.text('Recent'), findsOneWidget);
+    expect(find.text('A–Z'), findsOneWidget);
+    expect(find.text('Show'), findsOneWidget);
+    expect(find.byType(AlertDialog), findsNothing);
+    final alpha = tester.widget<ChoiceChip>(
+      find.ancestor(of: find.text('A–Z'), matching: find.byType(ChoiceChip)),
     );
-    final selectedCheck = find.byKey(const ValueKey('sort-selected-check'));
-    expect(selectedCheck, findsOneWidget);
-    expect(
-      tester.getCenter(selectedCheck).dx,
-      greaterThan(tester.getCenter(find.text('Sort: A–Z')).dx),
-    );
+    expect(alpha.selected, isTrue);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
 
     for (final label in ['general', 'Alice']) {
       final text = tester.widget<Text>(find.text(label));
@@ -1077,63 +1123,23 @@ void main() {
     await tester.tap(find.byKey(const Key('section-menu-section-1')));
     await tester.pumpAndSettle();
 
-    final popover = find.byKey(const Key('section-popover-section-1'));
-    expect(popover, findsOneWidget);
     for (final label in [
       'Rename section',
       'Move up',
       'Move down',
       'Delete section',
     ]) {
-      expect(
-        find.descendant(of: popover, matching: find.text(label)),
-        findsOne,
-      );
+      expect(find.text(label), findsOneWidget);
     }
-    for (final icon in [
-      BuzzIcons.pencil,
-      BuzzIcons.arrowUp,
-      BuzzIcons.arrowDown,
-      BuzzIcons.trash2,
-    ]) {
-      expect(
-        find.descendant(of: popover, matching: find.byIcon(icon)),
-        findsOne,
-      );
-    }
-
-    final actionMenuItems = tester
-        .widgetList<PopupMenuItem<String>>(
-          find.descendant(
-            of: popover,
-            matching: find.byWidgetPredicate(
-              (widget) => widget is PopupMenuItem<String>,
-            ),
-          ),
-        )
-        .where(
-          (item) => const {
-            'rename',
-            'move_up',
-            'move_down',
-            'delete',
-          }.contains(item.value),
-        );
-    expect(actionMenuItems, hasLength(4));
-    for (final item in actionMenuItems) {
-      expect(
-        item.padding,
-        const EdgeInsets.fromLTRB(Grid.xs, 0, Grid.twelve, 0),
-      );
-    }
-
-    final error = Theme.of(tester.element(popover)).colorScheme.error;
-    final deleteText = tester.widget<Text>(find.text('Delete section'));
-    final deleteIcon = tester.widget<Icon>(
-      find.descendant(of: popover, matching: find.byIcon(BuzzIcons.trash2)),
+    final moveUp = tester.widget<ListTile>(
+      find.ancestor(of: find.text('Move up'), matching: find.byType(ListTile)),
     );
-    expect(deleteText.style?.color, error);
-    expect(deleteIcon.color, error);
+    expect(moveUp.enabled, isFalse);
+    final deleteText = tester.widget<Text>(find.text('Delete section'));
+    expect(
+      deleteText.style?.color,
+      Theme.of(tester.element(find.text('Delete section'))).colorScheme.error,
+    );
   });
 
   testWidgets('aligns the top, section, row, and skeleton label columns', (

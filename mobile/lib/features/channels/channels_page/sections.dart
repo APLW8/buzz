@@ -1,11 +1,8 @@
 part of '../channels_page.dart';
 
-const _sectionMenuItemPadding = EdgeInsets.fromLTRB(Grid.xs, 0, Grid.twelve, 0);
-
-class _CustomChannelSection extends StatelessWidget {
+class _CustomChannelSection extends HookWidget {
   final ChannelSection section;
   final List<Channel> channels;
-  final VoidCallback? onFilter;
   final bool Function(Channel)? isVisible;
   final Set<String> unreadChannelIds;
   final Set<String> mutedChannelIds;
@@ -27,7 +24,6 @@ class _CustomChannelSection extends StatelessWidget {
   const _CustomChannelSection({
     required this.section,
     required this.channels,
-    this.onFilter,
     this.isVisible,
     required this.unreadChannelIds,
     required this.mutedChannelIds,
@@ -49,13 +45,21 @@ class _CustomChannelSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final reveal = useState(false);
+    final hiddenIds = channels
+        .where((c) => !(isVisible?.call(c) ?? true))
+        .map((c) => c.id)
+        .join(',');
+    useEffect(() {
+      reveal.value = false;
+      return null;
+    }, [hiddenIds]);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (showTopDivider) const _SectionDivider(),
         _CustomSectionHeader(
           section: section,
-          onFilter: onFilter,
           expanded: expanded,
           isFirst: isFirst,
           isLast: isLast,
@@ -73,7 +77,7 @@ class _CustomChannelSection extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               for (final channel in channels.where(
-                (c) => isVisible?.call(c) ?? true,
+                (c) => reveal.value || (isVisible?.call(c) ?? true),
               ))
                 _ChannelTile(
                   channel: channel,
@@ -83,6 +87,15 @@ class _CustomChannelSection extends StatelessWidget {
                   onTap: () => onSelectChannel(channel),
                   onMarkRead: () => onMarkChannelRead(channel),
                   sectionId: section.id,
+                ),
+              if (hiddenIds.isNotEmpty)
+                TextButton(
+                  onPressed: () => reveal.value = !reveal.value,
+                  child: Text(
+                    reveal.value
+                        ? 'Hide filtered channels'
+                        : 'Show hidden channels · ${channels.where((c) => !(isVisible?.call(c) ?? true)).length}',
+                  ),
                 ),
               const SizedBox(height: _kExpandedSectionTrailingPadding),
             ],
@@ -99,7 +112,6 @@ class _CustomSectionHeader extends StatelessWidget {
   final bool isFirst;
   final bool isLast;
   final VoidCallback onToggle;
-  final VoidCallback? onFilter;
   final VoidCallback onRename;
   final VoidCallback onDelete;
   final VoidCallback onMoveUp;
@@ -113,7 +125,6 @@ class _CustomSectionHeader extends StatelessWidget {
     required this.isFirst,
     required this.isLast,
     required this.onToggle,
-    this.onFilter,
     required this.onRename,
     required this.onDelete,
     required this.onMoveUp,
@@ -157,64 +168,23 @@ class _CustomSectionHeader extends StatelessWidget {
                   color: sectionColor,
                 ),
                 onPressed: () async {
-                  final value = await showAnchoredPopover<String>(
-                    context: buttonContext,
-                    width: 216,
-                    alignment: AnchoredPopoverAlignment.end,
-                    surfaceKey: ValueKey('section-popover-${section.id}'),
-                    items: [
-                      const PopupMenuItem(
-                        value: 'rename',
-                        padding: _sectionMenuItemPadding,
-                        child: _SectionMenuItemContent(
-                          icon: BuzzIcons.pencil,
-                          label: 'Rename section',
-                        ),
-                      ),
-                      PopupMenuItem(
-                        value: 'move_up',
-                        enabled: !isFirst,
-                        padding: _sectionMenuItemPadding,
-                        child: const _SectionMenuItemContent(
-                          icon: BuzzIcons.arrowUp,
-                          label: 'Move up',
-                        ),
-                      ),
-                      PopupMenuItem(
-                        value: 'move_down',
-                        enabled: !isLast,
-                        padding: _sectionMenuItemPadding,
-                        child: const _SectionMenuItemContent(
-                          icon: BuzzIcons.arrowDown,
-                          label: 'Move down',
-                        ),
-                      ),
-                      ..._sortMenuItems(sortMode),
-                      if (onFilter != null) _filterMenuItem(),
-                      PopupMenuItem(
-                        value: 'delete',
-                        padding: _sectionMenuItemPadding,
-                        child: _SectionMenuItemContent(
-                          icon: BuzzIcons.trash2,
-                          label: 'Delete section',
-                          color: context.colors.error,
-                        ),
-                      ),
-                    ],
+                  final value = await _showSectionViewSheet(
+                    buttonContext,
+                    title: section.name,
+                    group: sectionSortGroupKey(section.id),
+                    sortMode: sortMode,
+                    onSort: onSortModeChange,
+                    custom: true,
+                    isFirst: isFirst,
+                    isLast: isLast,
                   );
                   switch (value) {
-                    case 'filter':
-                      onFilter?.call();
                     case 'rename':
                       onRename();
                     case 'move_up':
                       onMoveUp();
                     case 'move_down':
                       onMoveDown();
-                    case _kSortRecentMenuValue:
-                      onSortModeChange(ChannelSortMode.recent);
-                    case _kSortAlphaMenuValue:
-                      onSortModeChange(ChannelSortMode.alpha);
                     case 'delete':
                       onDelete();
                   }
@@ -225,36 +195,6 @@ class _CustomSectionHeader extends StatelessWidget {
           ],
         ),
       ),
-    );
-  }
-}
-
-class _SectionMenuItemContent extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final Color? color;
-
-  const _SectionMenuItemContent({
-    required this.icon,
-    required this.label,
-    this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon, size: 16, color: color),
-        const SizedBox(width: Grid.xxs),
-        Flexible(
-          child: Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: color == null ? null : TextStyle(color: color),
-          ),
-        ),
-      ],
     );
   }
 }
@@ -298,49 +238,11 @@ class _SectionNameDialog extends HookWidget {
   }
 }
 
-const _kSortRecentMenuValue = 'sort_recent';
-const _kSortAlphaMenuValue = 'sort_alpha';
-
-PopupMenuItem<String> _sortMenuItem({
-  required String value,
-  required String label,
-  required bool selected,
-}) => PopupMenuItem(
-  value: value,
-  child: Row(
-    children: [
-      Expanded(child: Text(label)),
-      if (selected)
-        const Icon(BuzzIcons.check, key: ValueKey('sort-selected-check'))
-      else
-        const SizedBox(width: 24),
-    ],
-  ),
-);
-
-List<PopupMenuEntry<String>> _sortMenuItems(
-  ChannelSortMode current, {
-  bool showDivider = true,
-}) => [
-  if (showDivider) const PopupMenuDivider(),
-  _sortMenuItem(
-    value: _kSortRecentMenuValue,
-    label: 'Sort: Recent',
-    selected: current == ChannelSortMode.recent,
-  ),
-  _sortMenuItem(
-    value: _kSortAlphaMenuValue,
-    label: 'Sort: A–Z',
-    selected: current == ChannelSortMode.alpha,
-  ),
-];
-
-class _ChannelSection extends StatelessWidget {
+class _ChannelSection extends HookWidget {
   final String title;
   final bool expanded;
   final VoidCallback onToggle;
   final List<Channel> channels;
-  final VoidCallback? onFilter;
   final bool Function(Channel)? isVisible;
   final bool showTopDivider;
   final Set<String> unreadChannelIds;
@@ -356,7 +258,6 @@ class _ChannelSection extends StatelessWidget {
     required this.expanded,
     required this.onToggle,
     required this.channels,
-    this.onFilter,
     this.isVisible,
     required this.showTopDivider,
     required this.unreadChannelIds,
@@ -370,6 +271,15 @@ class _ChannelSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final reveal = useState(false);
+    final hiddenIds = channels
+        .where((c) => !(isVisible?.call(c) ?? true))
+        .map((c) => c.id)
+        .join(',');
+    useEffect(() {
+      reveal.value = false;
+      return null;
+    }, [hiddenIds]);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -377,7 +287,6 @@ class _ChannelSection extends StatelessWidget {
         _SectionHeader(
           label: title,
           expanded: expanded,
-          onFilter: onFilter,
           onToggle: onToggle,
           sortMode: sortMode,
           onSortModeChange: onSortModeChange,
@@ -404,7 +313,7 @@ class _ChannelSection extends StatelessWidget {
                 )
               else
                 for (final channel in channels.where(
-                  (c) => isVisible?.call(c) ?? true,
+                  (c) => reveal.value || (isVisible?.call(c) ?? true),
                 ))
                   _ChannelTile(
                     channel: channel,
@@ -415,6 +324,15 @@ class _ChannelSection extends StatelessWidget {
                     onMarkRead: null,
                     sectionId: null,
                   ),
+              if (hiddenIds.isNotEmpty)
+                TextButton(
+                  onPressed: () => reveal.value = !reveal.value,
+                  child: Text(
+                    reveal.value
+                        ? 'Hide filtered channels'
+                        : 'Show hidden channels · ${channels.where((c) => !(isVisible?.call(c) ?? true)).length}',
+                  ),
+                ),
               const SizedBox(height: _kExpandedSectionTrailingPadding),
             ],
           ),
@@ -476,7 +394,6 @@ class _SectionHeader extends StatelessWidget {
   final String label;
   final bool expanded;
   final VoidCallback onToggle;
-  final VoidCallback? onFilter;
   final ChannelSortMode? sortMode;
   final ValueChanged<ChannelSortMode>? onSortModeChange;
 
@@ -484,7 +401,6 @@ class _SectionHeader extends StatelessWidget {
     required this.label,
     required this.expanded,
     required this.onToggle,
-    this.onFilter,
     this.sortMode,
     this.onSortModeChange,
   });
@@ -526,33 +442,13 @@ class _SectionHeader extends StatelessWidget {
                     color: sectionColor,
                   ),
                   onPressed: () async {
-                    final value = await showAnchoredPopover<String>(
-                      context: buttonContext,
-                      width: 216,
-                      alignment: AnchoredPopoverAlignment.end,
-                      color: context.colors.surface,
-                      elevation: 4,
-                      shadowColor: context.colors.shadow.withValues(
-                        alpha: 0.18,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(Radii.md),
-                        side: BorderSide(color: context.colors.outline),
-                      ),
-                      surfaceKey: ValueKey('sort-popover-$label'),
-                      items: [
-                        ..._sortMenuItems(mode, showDivider: false),
-                        if (onFilter != null) _filterMenuItem(),
-                      ],
+                    await _showSectionViewSheet(
+                      buttonContext,
+                      title: label,
+                      group: label.toLowerCase(),
+                      sortMode: mode,
+                      onSort: (value) => onSortModeChange?.call(value),
                     );
-                    if (value == 'filter') {
-                      onFilter?.call();
-                    }
-                    if (value == _kSortRecentMenuValue) {
-                      onSortModeChange?.call(ChannelSortMode.recent);
-                    } else if (value == _kSortAlphaMenuValue) {
-                      onSortModeChange?.call(ChannelSortMode.alpha);
-                    }
                   },
                 ),
               ),
@@ -614,9 +510,3 @@ class _SectionChevron extends StatelessWidget {
     );
   }
 }
-
-PopupMenuItem<String> _filterMenuItem() => const PopupMenuItem(
-  value: 'filter',
-  padding: _sectionMenuItemPadding,
-  child: _SectionMenuItemContent(icon: BuzzIcons.filter2, label: 'Filter'),
-);

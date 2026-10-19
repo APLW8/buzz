@@ -1,5 +1,4 @@
 import 'channel_unread.dart';
-import 'channel_filter/channel_filter_manager.dart';
 import 'channel_filter/channel_filter_activity.dart';
 import 'channel_filter/channel_filter_provider.dart';
 import 'channel_filter/channel_filter_store.dart';
@@ -30,7 +29,6 @@ import '../../shared/widgets/app_list_card.dart';
 import '../../shared/relay/relay.dart';
 import '../../shared/theme/theme.dart';
 import '../../shared/widgets/avatar_image.dart';
-import '../../shared/widgets/anchored_popover_menu.dart';
 import '../../shared/widgets/bee_refresh_indicator.dart';
 import '../../shared/widgets/bottom_up_page_route.dart';
 import '../../shared/widgets/buzz_loading_indicator.dart';

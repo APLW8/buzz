@@ -310,25 +310,6 @@ class _SliverChannelsList extends HookConsumerWidget {
       );
     }
 
-    void showFilter(String group, List<Channel> roster, VoidCallback expand) {
-      unawaited(
-        showBuzzModalBottomSheet<void>(
-          context: context,
-          showDragHandle: true,
-          builder: (_) => _SectionFilterSheet(
-            group: group,
-            channels: roster,
-            currentPubkey: currentPubkey,
-            selectedChannelId: selectedChannel.value,
-            onOpen: (channel) {
-              expand();
-              return openFilteredChannel(channel);
-            },
-          ),
-        ),
-      );
-    }
-
     List<Channel> customRoster(String id) => sortChannelsForList(
       streamChannels
           .where(
@@ -375,11 +356,6 @@ class _SliverChannelsList extends HookConsumerWidget {
                 onToggle: () => starredExpanded.value = !starredExpanded.value,
                 channels: starredStreamChannels,
                 isVisible: (c) => visible('starred', c),
-                onFilter: () => showFilter(
-                  'starred',
-                  starredStreamChannels,
-                  () => starredExpanded.value = true,
-                ),
                 unreadChannelIds: unreadChannelIds,
                 mutedChannelIds: mutedChannelIds,
                 currentPubkey: currentPubkey,
@@ -394,16 +370,6 @@ class _SliverChannelsList extends HookConsumerWidget {
                 section: section,
                 channels: customRoster(section.id),
                 isVisible: (c) => visible(sectionSortGroupKey(section.id), c),
-                onFilter: () => showFilter(
-                  sectionSortGroupKey(section.id),
-                  customRoster(section.id),
-                  () {
-                    sectionExpandedStates.value = {
-                      ...sectionExpandedStates.value,
-                      section.id: true,
-                    };
-                  },
-                ),
                 unreadChannelIds: unreadChannelIds,
                 mutedChannelIds: mutedChannelIds,
                 currentPubkey: currentPubkey,
@@ -516,11 +482,6 @@ class _SliverChannelsList extends HookConsumerWidget {
               onToggle: () => channelsExpanded.value = !channelsExpanded.value,
               channels: ungroupedStreamChannels,
               isVisible: (c) => visible('channels', c),
-              onFilter: () => showFilter(
-                'channels',
-                ungroupedStreamChannels,
-                () => channelsExpanded.value = true,
-              ),
               unreadChannelIds: unreadChannelIds,
               mutedChannelIds: mutedChannelIds,
               currentPubkey: currentPubkey,
@@ -536,11 +497,6 @@ class _SliverChannelsList extends HookConsumerWidget {
               onToggle: () => dmsExpanded.value = !dmsExpanded.value,
               channels: sortedDmChannels,
               isVisible: (c) => visible('dms', c),
-              onFilter: () => showFilter(
-                'dms',
-                sortedDmChannels,
-                () => dmsExpanded.value = true,
-              ),
               unreadChannelIds: unreadChannelIds,
               mutedChannelIds: mutedChannelIds,
               currentPubkey: currentPubkey,
