@@ -54,6 +54,12 @@ push capability. Supporting mobile clients add a single self-scoped
 for the first activation. They do not enumerate or synchronize thread follows.
 Old relays retain the existing mention/DM policy.
 
+The existing lease capacity limits still apply. If the authored rule cannot
+represent all channel mutes (more than 350) or no subscription slot remains,
+the client omits that rule while continuing to synchronize mention/DM policies.
+It never truncates mute exclusions or abandons the whole update. The authored
+rule returns when capacity is available again.
+
 The authenticated `/query` bridge accepts the same predicate and derives the
 recipient from the authenticated identity. Historical query filtering and batch
 wake matching share the database root-author relation, including community,

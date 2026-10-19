@@ -528,26 +528,6 @@ List<BuzzPushSubscription> buildDesiredBuzzPushSubscriptions({
     ),
   ];
 
-  if (authoredThreadReplies) {
-    final muted = normalizedMuted.toList()..sort();
-    subscriptions.add(
-      BuzzPushSubscription(
-        filter: BuzzPushFilter(
-          kinds: buzzPushEligibleKinds,
-          authoredThreadReplies: true,
-          since: authoredThreadRepliesSince,
-        ),
-        notificationClass: 'default',
-        ignore: [
-          selfAuthored,
-          for (final chunk in _chunks(muted, buzzPushChannelChunkSize))
-            BuzzPushFilter(kinds: buzzPushEligibleKinds, hTags: chunk),
-        ],
-        suppress: suppression,
-      ),
-    );
-  }
-
   final channels = normalizedChannelIds.difference(normalizedMuted).toList()
     ..sort();
   for (final chunk in _chunks(channels, buzzPushChannelChunkSize)) {
@@ -563,6 +543,32 @@ List<BuzzPushSubscription> buildDesiredBuzzPushSubscriptions({
   if (subscriptions.length > buzzPushMaxSubscriptions) {
     throw const FormatException('Too many channels for a push lease.');
   }
+  // Existing relay limits may leave no room for a fully muted authored rule.
+  // Omit that rule rather than dropping exclusions or aborting mention/DM sync.
+  final muted = normalizedMuted.toList()..sort();
+  final authoredMuteChunks = _chunks(muted, buzzPushChannelChunkSize);
+  if (authoredThreadReplies &&
+      authoredMuteChunks.length + 1 <= buzzPushMaxIgnoreFilters &&
+      subscriptions.length < buzzPushMaxSubscriptions) {
+    subscriptions.insert(
+      1,
+      BuzzPushSubscription(
+        filter: BuzzPushFilter(
+          kinds: buzzPushEligibleKinds,
+          authoredThreadReplies: true,
+          since: authoredThreadRepliesSince,
+        ),
+        notificationClass: 'default',
+        ignore: [
+          selfAuthored,
+          for (final chunk in authoredMuteChunks)
+            BuzzPushFilter(kinds: buzzPushEligibleKinds, hTags: chunk),
+        ],
+        suppress: suppression,
+      ),
+    );
+  }
+
   return List.unmodifiable(subscriptions);
 }
 
