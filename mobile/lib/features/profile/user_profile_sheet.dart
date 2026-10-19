@@ -82,7 +82,7 @@ class UserProfileSheet extends HookConsumerWidget {
     final profile =
         ref.watch(userCacheProvider.select((cache) => cache[pk])) ??
         ref.read(userCacheProvider.notifier).get(pk);
-    final presenceMap = ref.watch(presenceCacheProvider);
+    final presenceMap = ref.watch(presentedPresenceProvider);
     final presence = presenceMap[pk];
     final statusCache = ref.watch(userStatusCacheProvider);
     final userStatus = statusCache[pk];

@@ -228,6 +228,7 @@ class BuilderlabAccountClient {
   }) {
     const agentRoutes = {
       '/v3/beekeeper/register-agent',
+      '/v3/beekeeper/update-agent',
       '/v3/beekeeper/attest-agent',
       '/v3/beekeeper/list-agents',
       '/v3/beekeeper/add-buzz-subscription',

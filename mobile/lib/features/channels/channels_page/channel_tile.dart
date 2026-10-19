@@ -181,7 +181,7 @@ class _DmAvatar extends ConsumerWidget {
       ),
     );
     final presence = ref.watch(
-      presenceCacheProvider.select(
+      presentedPresenceProvider.select(
         (presenceMap) => otherPubkey == null ? null : presenceMap[otherPubkey],
       ),
     );

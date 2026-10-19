@@ -1,3 +1,4 @@
+import '../../shared/agents/agents_surface.dart';
 import 'channel_unread.dart';
 import '../../shared/widgets/collapsible_section_body.dart';
 import '../../shared/widgets/compose_morph_icon.dart';
@@ -447,6 +448,9 @@ class ChannelsPage extends HookConsumerWidget {
     final topSectionGradient = context.appColors.topSectionGradient;
     final usesPinnedGradient = topSectionGradient != null;
 
+    final openAgents = ref.watch(agentsSurfaceProvider);
+    final onAgents = openAgents == null ? null : () => openAgents(context);
+
     return FrostedScaffold(
       backgroundColor: usesPinnedGradient
           ? Colors.transparent
@@ -485,6 +489,14 @@ class ChannelsPage extends HookConsumerWidget {
               sharesBackground: true,
               icon: BuzzIcons.search300,
               onPressed: onSearch,
+            ),
+          if (onAgents != null)
+            IosNavigationAction(
+              label: 'Agents',
+              symbol: 'person.2',
+              sharesBackground: true,
+              icon: BuzzIcons.bot,
+              onPressed: onAgents,
             ),
           if (onInbox != null)
             IosNavigationAction(
@@ -534,6 +546,7 @@ class ChannelsPage extends HookConsumerWidget {
         actions: [
           _ChannelHeaderActions(
             onSearch: onSearch,
+            onAgents: onAgents,
             onInbox: onInbox,
             hasUnreadInbox: hasUnreadInbox,
             onSettings: () {

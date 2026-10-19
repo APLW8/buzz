@@ -3,12 +3,14 @@ part of '../channels_page.dart';
 class _ChannelHeaderActions extends StatelessWidget {
   const _ChannelHeaderActions({
     required this.onSearch,
+    required this.onAgents,
     required this.onInbox,
     required this.hasUnreadInbox,
     required this.onSettings,
   });
 
   final VoidCallback? onSearch;
+  final VoidCallback? onAgents;
   final VoidCallback? onInbox;
   final bool hasUnreadInbox;
   final VoidCallback onSettings;
@@ -27,6 +29,12 @@ class _ChannelHeaderActions extends StatelessWidget {
                 tooltip: 'Search',
                 icon: const Icon(BuzzIcons.search300),
                 onPressed: onSearch,
+              ),
+            if (onAgents != null)
+              IconButton(
+                tooltip: 'Agents',
+                icon: const Icon(BuzzIcons.bot),
+                onPressed: onAgents,
               ),
             if (onInbox != null)
               Semantics(

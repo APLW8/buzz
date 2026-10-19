@@ -19,6 +19,7 @@ import '../shared/hosted/hosted_backup_service.dart';
 import '../shared/hosted/hosted_community_creation.dart';
 import '../shared/hosted/hosted_relay_auth.dart';
 import '../shared/relay/relay_provider.dart';
+import '../shared/storage/secure_storage.dart';
 import '../shared/relay/signed_event_relay.dart';
 
 /// Staging-only experiment using the same account and Beekeeper contracts as desktop.
@@ -80,13 +81,14 @@ class RemoteAgentController extends ChangeNotifier {
     });
   }
 
-  Future<void> run(Future<void> Function() action) async {
-    if (busy) return;
+  Future<bool> run(Future<void> Function() action) async {
+    if (busy) return false;
     busy = true;
     final operation = ++_operation;
     notifyListeners();
     try {
       await action();
+      return true;
     } catch (error) {
       // Account failures never carry credentials or response bodies.
       status = error is AccountFailure
@@ -96,6 +98,7 @@ class RemoteAgentController extends ChangeNotifier {
           : error is StateError
           ? error.message.toString()
           : 'Operation failed (${error.runtimeType}). Retry the same setup.';
+      return false;
     } finally {
       if (operation == _operation) {
         busy = false;
@@ -104,7 +107,7 @@ class RemoteAgentController extends ChangeNotifier {
     }
   }
 
-  Future<void> signIn() => run(() async {
+  Future<bool> signIn() => run(() async {
     status =
         'Waiting for Mac Chrome. Open http://127.0.0.1:18763/start '
         'on your Mac, then sign in to your public staging account. '
@@ -128,6 +131,15 @@ class RemoteAgentController extends ChangeNotifier {
     pending = raw == null
         ? null
         : Map<String, dynamic>.from(jsonDecode(raw) as Map);
+    if (pending?['hasInstructions'] == true) {
+      final instructions = await accountSecureStorage.read(
+        key: '$_scope:instructions:${pending!['request']}',
+      );
+      if (instructions == null) {
+        throw StateError('Saved agent instructions are unavailable.');
+      }
+      pending!['instructions'] = instructions;
+    }
     if (owner == null) {
       status = 'Import your existing Buzz identity to discover communities.';
       return;
@@ -150,7 +162,7 @@ class RemoteAgentController extends ChangeNotifier {
         : 'Unfinished setup saved. Resume to use the same agent.';
   }
 
-  Future<void> createTestCommunity() => run(() async {
+  Future<bool> createTestCommunity() => run(() async {
     await ensureBinding();
     final subject = account.account!.subject;
     await HostedCreateCommunity(
@@ -210,13 +222,22 @@ class RemoteAgentController extends ChangeNotifier {
 
   Future<void> _savePending(Map<String, dynamic> value) async {
     final prefs = await SharedPreferences.getInstance();
-    if (!await prefs.setString('$_scope:pending', jsonEncode(value))) {
+    final persisted = Map<String, dynamic>.from(value)..remove('instructions');
+    final instructions = value['instructions'] as String?;
+    if (instructions != null && instructions.isNotEmpty) {
+      await accountSecureStorage.write(
+        key: '$_scope:instructions:${value['request']}',
+        value: instructions,
+      );
+      persisted['hasInstructions'] = true;
+    }
+    if (!await prefs.setString('$_scope:pending', jsonEncode(persisted))) {
       throw StateError('Could not save unfinished setup.');
     }
     pending = value;
   }
 
-  Future<void> create(String name) => run(() async {
+  Future<bool> create(String name, {String instructions = ''}) => run(() async {
     final selected = community;
     if (selected == null) {
       throw StateError('Choose an existing staging community.');
@@ -232,8 +253,12 @@ class RemoteAgentController extends ChangeNotifier {
           'Use 1–64 letters, numbers, spaces, dots, hyphens or underscores.',
         );
       }
+      if (instructions.trim().length > 20000) {
+        throw StateError('Use at most 20,000 characters for instructions.');
+      }
       await _savePending({
         'name': trimmed,
+        'instructions': instructions.trim(),
         'community': selected.relayUrl,
         'owner': owner,
         'request': const Uuid().v4(),
@@ -272,7 +297,33 @@ class RemoteAgentController extends ChangeNotifier {
       'community_url': selected.relayUrl,
     });
     requireStatus(result, 'ACTIVE', 1);
+    if ((setup['instructions'] as String?)?.isNotEmpty == true) {
+      await account.post('/v3/beekeeper/update-agent', {
+        'agent_pubkey': pubkey,
+        'agent_instructions': setup['instructions'],
+      });
+    }
     await subscribe(setup['id'] as String);
+    await publishPolicy(selected, setup);
+    // Retain the completed registration if the listing refresh fails, so Retry
+    // resumes the same identity instead of creating another agent.
+    await refresh();
+    final prefs = await SharedPreferences.getInstance();
+    await accountSecureStorage.delete(
+      key: '$_scope:instructions:${setup['request']}',
+    );
+    await prefs.remove('$_scope:pending');
+    pending = null;
+    status =
+        '${setup['name']} is active. Open Buzz and mention it in a channel.';
+  });
+
+  /// Publish the owner policy only after activation and subscription succeed.
+  Future<void> publishPolicy(
+    AddCommunityDeepLink selected,
+    Map<String, dynamic> setup,
+  ) async {
+    final pubkey = setup['pubkey'] as String;
     await keys.withKeys((key) async {
       await submitSignedEventOnce(
         wsUrl: selected.relayUrl,
@@ -292,13 +343,7 @@ class RemoteAgentController extends ChangeNotifier {
         ],
       );
     });
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('$_scope:pending');
-    pending = null;
-    await refresh();
-    status =
-        '${setup['name']} is active. Open Buzz and mention it in a channel.';
-  });
+  }
 
   Future<void> subscribe(String agentId) async {
     final selected = community;

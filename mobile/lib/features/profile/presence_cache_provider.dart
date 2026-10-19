@@ -1,3 +1,4 @@
+import '../../shared/agents/agents_surface.dart';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -240,3 +241,10 @@ final presenceCacheProvider =
     NotifierProvider<PresenceCacheNotifier, Map<String, String>>(
       PresenceCacheNotifier.new,
     );
+
+/// Presentation shared by profiles, DMs and mentions. Local presence is unchanged.
+final presentedPresenceProvider = Provider<Map<String, String>>((ref) {
+  final presence = ref.watch(presenceCacheProvider);
+  final remote = ref.watch(availableRemoteAgentsProvider);
+  return {...presence, for (final pubkey in remote) pubkey: 'online'};
+}, dependencies: [availableRemoteAgentsProvider]);
