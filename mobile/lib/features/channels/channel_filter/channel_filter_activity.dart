@@ -48,6 +48,7 @@ final channelFilterActivityProvider = FutureProvider.autoDispose
     .family<int?, String>((ref, channelId) async {
       // Every live message and foreground refresh updates this owner. Re-read
       // only the affected channel; never trust its unverified presentation stamp.
+      final channelsNotifier = ref.watch(channelsProvider.notifier);
       ref.watch(
         channelsProvider.select(
           (value) => (
@@ -55,7 +56,7 @@ final channelFilterActivityProvider = FutureProvider.autoDispose
                 ?.where((c) => c.id == channelId)
                 .firstOrNull
                 ?.lastMessageAt,
-            ref.read(channelsProvider.notifier).activityRevisionFor(channelId),
+            channelsNotifier.activityRevisionFor(channelId),
           ),
         ),
       );

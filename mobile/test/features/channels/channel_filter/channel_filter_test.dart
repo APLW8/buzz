@@ -1,3 +1,6 @@
+import 'package:buzz/features/channels/channels_provider.dart';
+import 'package:buzz/features/channels/channel.dart';
+import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:buzz/features/channels/channel_filter/channel_filter_manager.dart';
@@ -9,6 +12,57 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nostr/nostr.dart' as nostr;
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  test(
+    'activity provider reads history and excludes a quiet channel from Active',
+    () async {
+      final keys = nostr.Keys.generate();
+      final old = DateTime.now().millisecondsSinceEpoch ~/ 1000 - 8 * 86400;
+      final event = NostrEvent.fromJson(
+        nostr.Event.from(
+          kind: EventKind.streamMessage,
+          tags: [
+            ['h', 'quiet-channel'],
+          ],
+          content: 'Earlier activity',
+          secretKey: nostr.Nip19.decode(payload: keys.nsec).data,
+          createdAt: old,
+          verify: false,
+        ).toMap(),
+      );
+      final session = _ActivitySession(event);
+      final container = ProviderContainer(
+        overrides: [
+          channelsProvider.overrideWith(_ActivityChannels.new),
+          relaySessionProvider.overrideWith(() => session),
+        ],
+      );
+      addTearDown(container.dispose);
+      await container.read(channelsProvider.future);
+      final subscription = container.listen(
+        channelFilterActivityProvider('quiet-channel'),
+        (_, _) {},
+      );
+      addTearDown(subscription.close);
+      final activity = await container.read(
+        channelFilterActivityProvider('quiet-channel').future,
+      );
+      expect(session.requests, 1);
+      expect(activity, old);
+      expect(
+        channelMatchesFilter(
+          mode: ChannelFilterMode.active,
+          unread: false,
+          activitySeconds: activity,
+          activityKnown: true,
+          nowSeconds: old + 8 * 86400,
+          windowSeconds: 7 * 86400,
+        ),
+        isFalse,
+      );
+    },
+  );
+
   test(
     'metadata wins and edits preserve reset tombstones, unknown fields and windows',
     () {
@@ -295,4 +349,25 @@ void main() {
     );
     expect(verifiedFilterActivity([]), isNull);
   });
+}
+
+class _ActivityChannels extends ChannelsNotifier {
+  @override
+  Future<List<Channel>> build() async => [];
+}
+
+class _ActivitySession extends RelaySessionNotifier {
+  _ActivitySession(this.event);
+  final NostrEvent event;
+  int requests = 0;
+  @override
+  SessionState build() => const SessionState(status: SessionStatus.connected);
+  @override
+  Future<List<NostrEvent>> fetchHistory(
+    NostrFilter filter, {
+    Duration timeout = const Duration(seconds: 8),
+  }) async {
+    requests++;
+    return [event];
+  }
 }
