@@ -1,13 +1,17 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:isolate';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:nostr/nostr.dart' as nostr;
 
+import 'package:buzz/shared/crypto/event_signer.dart';
 import 'relay_provider.dart';
+
+typedef _MediaSigningIdentity = ({String secret, String? public});
 
 const _mediaGetAuthKind = 24242;
 const _mediaGetAuthLifetimeSeconds = 60;
@@ -48,7 +52,7 @@ class MediaGetAuthService {
 
   // Prepared only after a scoped request. Never shared across service/account
   // lifetimes; background requests return it for reuse by the next queued job.
-  nostr.Keys? _signingIdentity;
+  _MediaSigningIdentity? _signingIdentity;
 
   Map<String, String>? _cachedHeaders;
   DateTime? _refreshAt;
@@ -205,7 +209,12 @@ class MediaGetAuthService {
       throw Exception('Invalid nsec');
     }
 
-    final identity = _signingIdentity ??= nostr.Keys(privkeyHex);
+    final identity = _signingIdentity ??= (
+      secret: privkeyHex,
+      // The native signer derives this from its temporary keypair. Only the
+      // Dart backend needs a prepared public key to avoid redundant work.
+      public: Platform.isIOS ? null : nostr.Schnorr.derivePublicKey(privkeyHex),
+    );
 
     final expiration =
         (_now().millisecondsSinceEpoch ~/ 1000) + _mediaGetAuthLifetimeSeconds;
@@ -216,7 +225,7 @@ class MediaGetAuthService {
         ['server', authority],
     ];
 
-    return nostr.Event.from(
+    return signEvent(
       kind: _mediaGetAuthKind,
       content: 'Get buzz-media',
       tags: tags,
@@ -227,11 +236,12 @@ class MediaGetAuthService {
   }
 }
 
-({Map<String, String> headers, nostr.Keys? identity}) _mediaHeadersInBackground(
+({Map<String, String> headers, _MediaSigningIdentity? identity})
+_mediaHeadersInBackground(
   ({
     String baseUrl,
     String nsec,
-    nostr.Keys? identity,
+    _MediaSigningIdentity? identity,
     String url,
     DateTime now,
   })

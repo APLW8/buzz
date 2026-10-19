@@ -49,6 +49,23 @@ GitHub's mobile CI currently uses the Xcode default of its `macos-latest`
 runner. The internal release toolchain is configured separately in
 [buzz-releases](https://github.com/squareup/buzz-releases).
 
+### Event signing
+
+Use `shared/crypto/event_signer.dart` for signed events. iOS calls the existing
+CSecp256k1 library through synchronous FFI; other platforms retain the Dart
+signer. Burst-producing media authentication retains its bounded worker path
+because Debug Simulator bursts still exceed a frame budget. Event hashing remains in `nostr.Event.unsigned`. The native context is
+randomized once and shared read-only; each call creates, self-verifies with,
+and destroys its own keypair. It never caches account secrets.
+
+The Runner linker flags retain all three FFI symbols in Debug and Release.
+`NativeEventSignerTests` exercises the C adapter through Swift. The Dart
+cross-implementation tests additionally accept `BUZZ_SIGNER_LIBRARY` pointing
+to a locally compiled adapter library. `tool/benchmark_event_signer.dart`
+measures complete host calls; `tool/native_signing_probe.dart` is an explicit
+Simulator entry point for complete event, media-auth, and NIP-98 measurements.
+Neither benchmark represents physical-device release performance.
+
 ## Run
 
 ```bash
