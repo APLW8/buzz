@@ -58,6 +58,40 @@ void main() {
     },
   );
 
+  test(
+    'retirement releases queued capacity before the active worker ends',
+    () async {
+      final oldWorker = Completer<String>();
+      final newWorker = Completer<String>();
+      var calls = 0;
+      final signer = RelayQuerySigner(
+        sign: (_) {
+          calls++;
+          return calls == 1 ? oldWorker.future : newWorker.future;
+        },
+      );
+      final active = expectLater(signer.sign(_request), throwsStateError);
+      final queued = List.generate(
+        63,
+        (_) => expectLater(signer.sign(_request), throwsStateError),
+      );
+      await pumpEventQueue();
+      signer.retire();
+      final replacement = signer.sign(_request);
+      var queuedSettled = false;
+      unawaited(Future.wait(queued).then((_) => queuedSettled = true));
+      await pumpEventQueue();
+      expect(queuedSettled, isTrue);
+      expect(calls, 1);
+      oldWorker.complete('retired');
+      await active;
+      await pumpEventQueue();
+      expect(calls, 2);
+      newWorker.complete('replacement');
+      expect(await replacement, 'replacement');
+    },
+  );
+
   test('a failed worker does not poison the next request', () async {
     var calls = 0;
     final signer = RelayQuerySigner(

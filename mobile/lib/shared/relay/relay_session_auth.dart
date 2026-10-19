@@ -20,40 +20,58 @@ class RelayQuerySigner {
 
   final Future<String> Function(RelayQueryAuthRequest) _sign;
   static const _maxPending = 64;
-  Future<void> _tail = Future<void>.value();
-  int _pending = 0;
+  final _queue = Queue<_RelayQuerySigningJob>();
+  bool _running = false;
   int _generation = 0;
 
   /// Signs one request, rejecting excess work without retaining another job.
   Future<String> sign(RelayQueryAuthRequest request) {
-    if (_pending >= _maxPending) {
+    if (_queue.length + (_running ? 1 : 0) >= _maxPending) {
       return Future.error(StateError('Relay query signing queue is full'));
     }
-    final generation = _generation;
-    _pending++;
-    final released = Completer<void>();
-    final result = _tail.then((_) async {
-      try {
-        if (generation != _generation) {
-          throw StateError('Relay query belongs to a retired session');
-        }
-        final header = await _sign(request);
-        if (generation != _generation) {
-          throw StateError('Relay query belongs to a retired session');
-        }
-        return header;
-      } finally {
-        _pending--;
-        released.complete();
-      }
-    });
-    // Failure is delivered to the caller; it must not poison later jobs.
-    _tail = released.future;
-    return result;
+    final job = _RelayQuerySigningJob(request, _generation);
+    _queue.addLast(job);
+    if (!_running) unawaited(_drain());
+    return job.result.future;
   }
 
-  /// Invalidates admitted work while allowing a rebuilt session to sign again.
-  void retire() => _generation++;
+  Future<void> _drain() async {
+    _running = true;
+    try {
+      while (_queue.isNotEmpty) {
+        final job = _queue.removeFirst();
+        try {
+          final header = await _sign(job.request);
+          if (job.generation != _generation) {
+            throw StateError('Relay query belongs to a retired session');
+          }
+          job.result.complete(header);
+        } catch (error, stack) {
+          job.result.completeError(error, stack);
+        }
+      }
+    } finally {
+      _running = false;
+    }
+  }
+
+  /// Cancels queued work immediately, preserving the active worker barrier.
+  void retire() {
+    _generation++;
+    while (_queue.isNotEmpty) {
+      _queue.removeFirst().result.completeError(
+        StateError('Relay query belongs to a retired session'),
+      );
+    }
+  }
+}
+
+class _RelayQuerySigningJob {
+  _RelayQuerySigningJob(this.request, this.generation);
+
+  final RelayQueryAuthRequest request;
+  final int generation;
+  final result = Completer<String>();
 }
 
 Future<String> _signQueryInBackground(RelayQueryAuthRequest request) =>
