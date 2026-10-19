@@ -210,9 +210,12 @@ jobs:
       - name: Test native pagination geometry
         if: matrix.lane == 'native'
         run: /bin/bash scripts/test-mobile-pagination.sh
-      - name: Build complete iOS simulator app
+      # Generate the Xcode config and Pods only. The xcodebuild test below
+      # builds and links the full simulator app, which catches simulator
+      # link regressions without a second full build.
+      - name: Prepare iOS simulator project
         if: matrix.lane == 'native'
-        run: cd mobile && flutter build ios --simulator --debug --no-pub
+        run: cd mobile && flutter build ios --config-only --simulator --debug --no-pub
       - name: Test native controls and push navigation bridge
         if: matrix.lane == 'native'
         run: |

@@ -87,6 +87,7 @@ jobs:
               - 'web/**'
               - 'pnpm-lock.yaml'
             mobile:
+              - '.github/workflows/_ci-clients.yml'
               - 'mobile/**'
               - 'Justfile'
               - 'scripts/test-mobile-gateway-recipes.sh'
