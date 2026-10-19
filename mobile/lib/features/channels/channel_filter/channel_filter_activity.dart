@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:nostr/nostr.dart' as nostr;
 import '../../../shared/relay/relay.dart';
@@ -45,16 +46,22 @@ class _ActivityReadPool {
 final _activityReadPoolProvider = Provider((ref) => _ActivityReadPool());
 final channelFilterActivityProvider = FutureProvider.autoDispose
     .family<int?, String>((ref, channelId) async {
-      // Live messages and foreground refresh already update this owner. Re-read
+      // Every live message and foreground refresh updates this owner. Re-read
       // only the affected channel; never trust its unverified presentation stamp.
       ref.watch(
         channelsProvider.select(
-          (value) => value.value
-              ?.where((c) => c.id == channelId)
-              .firstOrNull
-              ?.lastMessageAt,
+          (value) => (
+            value.value
+                ?.where((c) => c.id == channelId)
+                .firstOrNull
+                ?.lastMessageAt,
+            ref.read(channelsProvider.notifier).activityRevisionFor(channelId),
+          ),
         ),
       );
+      ref.listen(appLifecycleProvider, (_, next) {
+        if (next == AppLifecycleState.resumed) ref.invalidateSelf();
+      });
       final session = ref.watch(relaySessionProvider.select((s) => s.status));
       if (session != SessionStatus.connected) {
         throw StateError('Activity unavailable while disconnected');

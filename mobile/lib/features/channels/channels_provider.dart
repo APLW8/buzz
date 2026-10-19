@@ -56,6 +56,12 @@ class ChannelsNotifier extends AsyncNotifier<List<Channel>> {
   String? _subscriptionRelayBaseUrl;
   Timer? _backstopTimer;
   final Map<String, int> _latestObservedByChannel = {};
+  final Map<String, int> _activityRevisions = {};
+
+  /// Invalidates verified activity reads for every live message, including
+  /// self-authored or muted messages, without changing unread or sort state.
+  int activityRevisionFor(String channelId) =>
+      _activityRevisions[channelId] ?? 0;
   final Map<String, Map<String, ObservedUnreadEvent>>
   _observedUnreadEventsByChannel = {};
   Set<String> _participatedRootIds = {};
@@ -174,6 +180,7 @@ class ChannelsNotifier extends AsyncNotifier<List<Channel>> {
     ref.onDispose(() {
       _clearLiveSubscriptions();
       _latestObservedByChannel.clear();
+      _activityRevisions.clear();
       _observedUnreadEventsByChannel.clear();
       _backstopTimer?.cancel();
       _backstopTimer = null;
@@ -784,6 +791,7 @@ class ChannelsNotifier extends AsyncNotifier<List<Channel>> {
       }
       final updated = List<Channel>.of(channels);
       final channel = updated[idx];
+      _activityRevisions[channelId] = activityRevisionFor(channelId) + 1;
 
       if (myPk != null && event.pubkey.toLowerCase() == myPk.toLowerCase()) {
         _recordSelfThreadInterest(event, myPk);
@@ -867,6 +875,7 @@ class ChannelsNotifier extends AsyncNotifier<List<Channel>> {
 
   void clearObservedUnreadForChannel(String channelId) {
     _latestObservedByChannel.remove(channelId);
+    _activityRevisions.remove(channelId);
     _observedUnreadEventsByChannel.remove(channelId);
     state = state.whenData((channels) => List<Channel>.of(channels));
   }

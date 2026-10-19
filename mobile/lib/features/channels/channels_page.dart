@@ -546,6 +546,7 @@ class ChannelsPage extends HookConsumerWidget {
         usesPinnedGradient: usesPinnedGradient,
         scrollController: channelsScrollController,
         onRefresh: () async {
+          ref.invalidate(channelFilterActivityProvider);
           await Future.wait([
             ref.read(channelsProvider.notifier).refresh(),
             if (ref.read(channelFilterProvider) case final manager?)
