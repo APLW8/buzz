@@ -43,7 +43,9 @@ dependencies:
   package_info_plus: ^10.0.0
   app_badge_plus: ^1.2.10
   app_links: ^6.4.0
-  scrollable_positioned_list: ^0.3.8
+  # Vendored 0.3.8 with stable item keys; see third_party/scrollable_positioned_list/VENDORED.md.
+  scrollable_positioned_list:
+    path: third_party/scrollable_positioned_list
   open_filex: ^4.7.0
   path_provider: ^2.1.6
   share_plus: ^13.3.0
