@@ -202,15 +202,18 @@ short sender pubkey, community subtitle, and no image.
 
 ## Channel section filters
 
-Each section's options menu includes **Filter**. Its touch-sized sheet offers
-All, Unreads, and Active in the last, followed by channels hidden by that filter.
-Opening a hidden channel expands its section without changing the saved filter.
-Filtered-empty sections retain their header and options. Sorting and section
-membership are unchanged.
+Each section's options menu opens one sheet with Sort and Show controls using
+the shared sheet header and checked list rows. Show offers All, Unreads, and
+Active; Active reveals inline 1-, 7-, 30-, and 90-day choices. Apply commits the
+draft; Cancel discards it. A failed filter save keeps the draft for Retry.
 
-Active opens a scrollable dialog with 1-, 7-, 30-, and 90-day choices. Apply saves
-both the mode and duration; Cancel discards the draft. A failed Apply keeps the
-draft for Retry. Unreads uses the shared unread computation, including manually
+Filtered sections offer **Show hidden channels** in the main list, expanding
+the original sorted roster without changing the saved filter. Filtered-empty
+sections retain their header, options and recovery control. Section membership
+and sorting ownership are unchanged. Filter mode and duration are confirmed
+together; sorting retains its existing asynchronous persistence contract.
+
+Unreads uses the shared unread computation, including manually
 marked unread channels and observed unread thread replies. Active uses verified
 message timestamps; unavailable activity leaves channels visible with Retry.
 
@@ -219,7 +222,8 @@ Mobile reads and writes the desktop-compatible encrypted kind-30078
 metadata registers, null All tombstones, durations, and unrelated record fields.
 A cached copy is display-only until a complete relay read succeeds. Writes read
 the fresh record, publish one update, and confirm the mode and duration on relay
-readback. Failed saves roll back locally and offer explicit Retry/Dismiss.
+readback. Failed saves roll back locally; the sheet retains the draft for Retry
+or Cancel.
 Preference refresh happens on load, foreground resume, and pull to refresh;
 instant cross-device preference synchronization is not promised. Filter choices
 are disabled while preferences are unavailable; hidden-channel navigation remains
