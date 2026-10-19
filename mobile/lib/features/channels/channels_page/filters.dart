@@ -137,22 +137,50 @@ class _SectionViewSheet extends HookConsumerWidget {
       children: [
         Text(label, style: context.textTheme.titleSmall),
         const SizedBox(height: Grid.xxs),
-        Wrap(
-          spacing: Grid.xxs,
-          runSpacing: Grid.xxs,
-          children: [
+        SegmentedButton<T>(
+          segments: [
             for (final entry in values.entries)
-              ChoiceChip(
-                label: Text(entry.value),
-                selected: entry.key == selected,
-                onSelected: change == null
-                    ? null
-                    : (_) {
-                        dirty.value = true;
-                        change(entry.key);
-                      },
-              ),
+              ButtonSegment(value: entry.key, label: Text(entry.value)),
           ],
+          selected: {selected},
+          showSelectedIcon: false,
+          direction: MediaQuery.textScalerOf(context).scale(14) > 20
+              ? Axis.vertical
+              : Axis.horizontal,
+          expandedInsets: MediaQuery.textScalerOf(context).scale(14) > 20
+              ? null
+              : EdgeInsets.zero,
+          style: ButtonStyle(
+            foregroundColor: WidgetStateProperty.resolveWith(
+              (states) => states.contains(WidgetState.disabled)
+                  ? context.colors.onSurface.withValues(alpha: 0.5)
+                  : states.contains(WidgetState.selected)
+                  ? context.colors.onSurface
+                  : context.colors.onSurfaceVariant,
+            ),
+            backgroundColor: WidgetStateProperty.resolveWith(
+              (states) => states.contains(WidgetState.selected)
+                  ? context.colors.surface
+                  : context.colors.onSurface.withValues(alpha: 0.06),
+            ),
+            side: WidgetStatePropertyAll(
+              BorderSide(color: context.colors.outline.withValues(alpha: 0.25)),
+            ),
+            shape: WidgetStatePropertyAll(
+              RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(Radii.sm),
+              ),
+            ),
+            padding: const WidgetStatePropertyAll(
+              EdgeInsets.symmetric(horizontal: Grid.xxs, vertical: Grid.twelve),
+            ),
+          ),
+          onSelectionChanged: change == null
+              ? null
+              : (selection) {
+                  dirty.value = true;
+                  change(selection.single);
+                },
         ),
         const SizedBox(height: Grid.xs),
       ],
@@ -165,14 +193,24 @@ class _SectionViewSheet extends HookConsumerWidget {
             maxHeight: MediaQuery.sizeOf(context).height * 0.85,
           ),
           child: Padding(
-            padding: const EdgeInsets.all(Grid.xs),
+            padding: const EdgeInsets.fromLTRB(
+              Grid.gutter,
+              Grid.xxs,
+              Grid.gutter,
+              Grid.twelve,
+            ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Row(
                   children: [
                     Expanded(
-                      child: Text(title, style: context.textTheme.titleLarge),
+                      child: Text(
+                        title,
+                        style: context.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ),
                     IconButton(
                       tooltip: 'Close',
@@ -259,28 +297,35 @@ class _SectionViewSheet extends HookConsumerWidget {
                   ),
                 ),
                 const SizedBox(height: Grid.xxs),
-                Wrap(
-                  alignment: WrapAlignment.end,
-                  spacing: Grid.xxs,
-                  runSpacing: Grid.xxs,
-                  children: [
-                    TextButton(
-                      onPressed: saving.value ? null : () => close(),
-                      child: const Text('Cancel'),
-                    ),
-                    FilledButton(
-                      onPressed: saving.value || manager?.busy == true
-                          ? null
-                          : apply,
-                      child: Text(
-                        saving.value
-                            ? 'Saving…'
-                            : failed.value
-                            ? 'Retry'
-                            : 'Apply',
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: Wrap(
+                    alignment: WrapAlignment.end,
+                    spacing: Grid.xxs,
+                    runSpacing: Grid.xxs,
+                    children: [
+                      TextButton(
+                        onPressed: saving.value ? null : () => close(),
+                        child: const Text('Cancel'),
                       ),
-                    ),
-                  ],
+                      FilledButton(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: context.colors.onSurface,
+                          foregroundColor: context.colors.surface,
+                        ),
+                        onPressed: saving.value || manager?.busy == true
+                            ? null
+                            : apply,
+                        child: Text(
+                          saving.value
+                              ? 'Saving…'
+                              : failed.value
+                              ? 'Retry'
+                              : 'Apply',
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
