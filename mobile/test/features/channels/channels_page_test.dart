@@ -1,3 +1,8 @@
+import 'package:nostr/nostr.dart' as nostr;
+import 'package:buzz/features/channels/channel_filter/channel_filter_provider.dart';
+import 'package:buzz/features/channels/channel_filter/channel_filter_manager.dart';
+import 'package:buzz/features/channels/channel_filter/channel_filter_store.dart';
+import 'package:buzz/features/channels/channel_sort/channel_sort_manager.dart';
 import 'package:buzz/features/home/home_page.dart';
 import 'package:buzz/shared/widgets/app_route_observer.dart';
 import 'package:buzz/features/pairing/pairing_provider.dart';
@@ -195,6 +200,89 @@ void main() {
   presenceListTests(
     (overrides) => buildTestable(overrides: overrides),
     testChannels,
+  );
+
+  testWidgets(
+    'read-only filter retains an empty header and hidden navigation',
+    (tester) async {
+      final manager = _filterTestManager(
+        cached: ChannelFilterStore.empty().edit(
+          'channels',
+          ChannelFilterMode.unreads,
+        ),
+      );
+      await tester.pumpWidget(
+        buildTestable(
+          overrides: [
+            channelsProvider.overrideWith(() => _FakeNotifier(testChannels)),
+            channelFilterProvider.overrideWithValue(manager),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('general'), findsNothing);
+      expect(find.byTooltip('Channels options'), findsOneWidget);
+      await tester.tap(find.byTooltip('Channels options'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Filter'));
+      await tester.pumpAndSettle();
+      expect(find.text('general'), findsOneWidget);
+      final all = tester.widget<ListTile>(
+        find.ancestor(of: find.text('All'), matching: find.byType(ListTile)),
+      );
+      expect(all.enabled, isFalse);
+      expect(tester.widget<InkWell>(_dmTileFor('general')).onTap, isNotNull);
+      await tester.pumpWidget(const SizedBox());
+      manager.dispose();
+    },
+  );
+
+  testWidgets(
+    'failed Active Apply retains duration draft; Cancel discards it at enlarged text',
+    (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final manager = _filterTestManager(failPublish: true)..ready = true;
+      await tester.pumpWidget(
+        buildTestable(
+          textScaler: const TextScaler.linear(2),
+          overrides: [
+            channelsProvider.overrideWith(() => _FakeNotifier(testChannels)),
+            channelFilterProvider.overrideWithValue(manager),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Channels options'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Filter'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Active in the last'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('7 days'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Apply'));
+      await tester.tap(find.text('Apply'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text(
+          'Could not confirm the save. Your selection is retained. Retry or Cancel.',
+        ),
+        findsOneWidget,
+      );
+      final selected = tester.widget<Text>(find.text('7 days'));
+      expect(selected.style?.fontWeight, FontWeight.bold);
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(manager.store.modeFor('channels'), ChannelFilterMode.all);
+      expect(manager.store.windowFor('channels'), defaultActiveWindowSeconds);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      manager.dispose();
+    },
   );
 
   testWidgets('DM tile presence observation failure hides the dot', (
@@ -4241,4 +4329,37 @@ class _SwitchingUserCache extends UserCacheNotifier {
 class _CompletedPairingNotifier extends PairingNotifier {
   @override
   PairingState build() => const PairingState(status: PairingStatus.success);
+}
+
+ChannelFilterManager _filterTestManager({
+  ChannelFilterStore? cached,
+  bool failPublish = false,
+}) {
+  final keys = nostr.Keys.generate();
+  final crypto = ChannelSortCrypto(keys.nsec, keys.public);
+  var history = <NostrEvent>[];
+  return ChannelFilterManager(
+    pubkey: keys.public,
+    crypto: crypto,
+    cached: cached,
+    cache: (_) {},
+    fetch: () async => history,
+    publish: (content, at) async {
+      if (failPublish) throw StateError('rejected');
+      history = [
+        NostrEvent.fromJson(
+          nostr.Event.from(
+            kind: EventKind.readState,
+            tags: [
+              ['d', 'channel-filter'],
+            ],
+            content: content,
+            secretKey: nostr.Nip19.decode(payload: keys.nsec).data,
+            createdAt: at,
+            verify: false,
+          ).toMap(),
+        ),
+      ];
+    },
+  );
 }

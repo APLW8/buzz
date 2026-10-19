@@ -1,4 +1,8 @@
 import 'channel_unread.dart';
+import 'channel_filter/channel_filter_manager.dart';
+import 'channel_filter/channel_filter_activity.dart';
+import 'channel_filter/channel_filter_provider.dart';
+import 'channel_filter/channel_filter_store.dart';
 import '../../shared/widgets/collapsible_section_body.dart';
 import '../../shared/widgets/compose_morph_icon.dart';
 import '../../shared/me/me_sync.dart';
@@ -65,6 +69,7 @@ import '../../shared/read_state/read_state_time.dart';
 part 'channels_page/body.dart';
 part 'channels_page/browse_channels_sheet.dart';
 part 'channels_page/sections.dart';
+part 'channels_page/filters.dart';
 part 'channels_page/channel_tile.dart';
 part 'channels_page/sheets.dart';
 part 'channels_page/badges.dart';
@@ -540,7 +545,13 @@ class ChannelsPage extends HookConsumerWidget {
         topSectionHeight: topSectionHeight,
         usesPinnedGradient: usesPinnedGradient,
         scrollController: channelsScrollController,
-        onRefresh: () => ref.read(channelsProvider.notifier).refresh(),
+        onRefresh: () async {
+          await Future.wait([
+            ref.read(channelsProvider.notifier).refresh(),
+            if (ref.read(channelFilterProvider) case final manager?)
+              manager.refresh(),
+          ]);
+        },
         onSelectChannel: openChannel,
       ),
     );

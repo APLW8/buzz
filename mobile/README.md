@@ -200,6 +200,31 @@ for names and app-rendered avatar thumbnails. It never fetches an avatar URL;
 missing, stale, or invalid enrichment falls back to the verified message with a
 short sender pubkey, community subtitle, and no image.
 
+## Channel section filters
+
+Each section's options menu includes **Filter**. Its touch-sized sheet offers
+All, Unreads, and Active in the last, followed by channels hidden by that filter.
+Opening a hidden channel expands its section without changing the saved filter.
+Filtered-empty sections retain their header and options. Sorting and section
+membership are unchanged.
+
+Active opens a scrollable dialog with 1-, 7-, 30-, and 90-day choices. Apply saves
+both the mode and duration; Cancel discards the draft. A failed Apply keeps the
+draft for Retry. Unreads uses the shared unread computation, including manually
+marked unread channels and observed unread thread replies. Active uses verified
+message timestamps; unavailable activity leaves channels visible with Retry.
+
+Mobile reads and writes the desktop-compatible encrypted kind-30078
+`channel-filter` preference for the current account and community. It preserves
+metadata registers, null All tombstones, durations, and unrelated record fields.
+A cached copy is display-only until a complete relay read succeeds. Writes read
+the fresh record, publish one update, and confirm the mode and duration on relay
+readback. Failed saves roll back locally and offer explicit Retry/Dismiss.
+Preference refresh happens on load, foreground resume, and pull to refresh;
+instant cross-device preference synchronization is not promised. Filter choices
+are disabled while preferences are unavailable; hidden-channel navigation remains
+available. Deleting a custom section confirms its filter reset before removal.
+
 ## Checks
 
 ```bash

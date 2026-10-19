@@ -5,6 +5,8 @@ const _sectionMenuItemPadding = EdgeInsets.fromLTRB(Grid.xs, 0, Grid.twelve, 0);
 class _CustomChannelSection extends StatelessWidget {
   final ChannelSection section;
   final List<Channel> channels;
+  final VoidCallback? onFilter;
+  final bool Function(Channel)? isVisible;
   final Set<String> unreadChannelIds;
   final Set<String> mutedChannelIds;
   final String? currentPubkey;
@@ -25,6 +27,8 @@ class _CustomChannelSection extends StatelessWidget {
   const _CustomChannelSection({
     required this.section,
     required this.channels,
+    this.onFilter,
+    this.isVisible,
     required this.unreadChannelIds,
     required this.mutedChannelIds,
     required this.currentPubkey,
@@ -51,6 +55,7 @@ class _CustomChannelSection extends StatelessWidget {
         if (showTopDivider) const _SectionDivider(),
         _CustomSectionHeader(
           section: section,
+          onFilter: onFilter,
           expanded: expanded,
           isFirst: isFirst,
           isLast: isLast,
@@ -67,7 +72,9 @@ class _CustomChannelSection extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              for (final channel in channels)
+              for (final channel in channels.where(
+                (c) => isVisible?.call(c) ?? true,
+              ))
                 _ChannelTile(
                   channel: channel,
                   isUnread: unreadChannelIds.contains(channel.id),
@@ -92,6 +99,7 @@ class _CustomSectionHeader extends StatelessWidget {
   final bool isFirst;
   final bool isLast;
   final VoidCallback onToggle;
+  final VoidCallback? onFilter;
   final VoidCallback onRename;
   final VoidCallback onDelete;
   final VoidCallback onMoveUp;
@@ -105,6 +113,7 @@ class _CustomSectionHeader extends StatelessWidget {
     required this.isFirst,
     required this.isLast,
     required this.onToggle,
+    this.onFilter,
     required this.onRename,
     required this.onDelete,
     required this.onMoveUp,
@@ -181,6 +190,7 @@ class _CustomSectionHeader extends StatelessWidget {
                         ),
                       ),
                       ..._sortMenuItems(sortMode),
+                      if (onFilter != null) _filterMenuItem(),
                       PopupMenuItem(
                         value: 'delete',
                         padding: _sectionMenuItemPadding,
@@ -193,6 +203,8 @@ class _CustomSectionHeader extends StatelessWidget {
                     ],
                   );
                   switch (value) {
+                    case 'filter':
+                      onFilter?.call();
                     case 'rename':
                       onRename();
                     case 'move_up':
@@ -328,6 +340,8 @@ class _ChannelSection extends StatelessWidget {
   final bool expanded;
   final VoidCallback onToggle;
   final List<Channel> channels;
+  final VoidCallback? onFilter;
+  final bool Function(Channel)? isVisible;
   final bool showTopDivider;
   final Set<String> unreadChannelIds;
   final Set<String> mutedChannelIds;
@@ -342,6 +356,8 @@ class _ChannelSection extends StatelessWidget {
     required this.expanded,
     required this.onToggle,
     required this.channels,
+    this.onFilter,
+    this.isVisible,
     required this.showTopDivider,
     required this.unreadChannelIds,
     required this.mutedChannelIds,
@@ -361,6 +377,7 @@ class _ChannelSection extends StatelessWidget {
         _SectionHeader(
           label: title,
           expanded: expanded,
+          onFilter: onFilter,
           onToggle: onToggle,
           sortMode: sortMode,
           onSortModeChange: onSortModeChange,
@@ -370,7 +387,7 @@ class _ChannelSection extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (channels.isEmpty)
+              if (channels.isEmpty && emptyLabel.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(
                     left: _kChannelLabelInset,
@@ -386,7 +403,9 @@ class _ChannelSection extends StatelessWidget {
                   ),
                 )
               else
-                for (final channel in channels)
+                for (final channel in channels.where(
+                  (c) => isVisible?.call(c) ?? true,
+                ))
                   _ChannelTile(
                     channel: channel,
                     isUnread: unreadChannelIds.contains(channel.id),
@@ -457,6 +476,7 @@ class _SectionHeader extends StatelessWidget {
   final String label;
   final bool expanded;
   final VoidCallback onToggle;
+  final VoidCallback? onFilter;
   final ChannelSortMode? sortMode;
   final ValueChanged<ChannelSortMode>? onSortModeChange;
 
@@ -464,6 +484,7 @@ class _SectionHeader extends StatelessWidget {
     required this.label,
     required this.expanded,
     required this.onToggle,
+    this.onFilter,
     this.sortMode,
     this.onSortModeChange,
   });
@@ -519,8 +540,14 @@ class _SectionHeader extends StatelessWidget {
                         side: BorderSide(color: context.colors.outline),
                       ),
                       surfaceKey: ValueKey('sort-popover-$label'),
-                      items: _sortMenuItems(mode, showDivider: false),
+                      items: [
+                        ..._sortMenuItems(mode, showDivider: false),
+                        if (onFilter != null) _filterMenuItem(),
+                      ],
                     );
+                    if (value == 'filter') {
+                      onFilter?.call();
+                    }
                     if (value == _kSortRecentMenuValue) {
                       onSortModeChange?.call(ChannelSortMode.recent);
                     } else if (value == _kSortAlphaMenuValue) {
@@ -587,3 +614,9 @@ class _SectionChevron extends StatelessWidget {
     );
   }
 }
+
+PopupMenuItem<String> _filterMenuItem() => const PopupMenuItem(
+  value: 'filter',
+  padding: _sectionMenuItemPadding,
+  child: _SectionMenuItemContent(icon: BuzzIcons.filter2, label: 'Filter'),
+);
