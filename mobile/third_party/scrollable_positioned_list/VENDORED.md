@@ -7,4 +7,9 @@
 
 ## Local changes
 
-None yet.
+The upstream package keys every item by its index, so inserting a message
+at the bottom of a reversed chat moves every item to a new key and remounts
+every built row. The change adds an optional `findChildIndexCallback` to
+`ScrollablePositionedList`. When it is set, an item whose widget has a key
+keeps that key in the list, and the callback finds its new index.
+Without the callback, the package behaves as upstream.

@@ -3686,6 +3686,33 @@ void main() {
       );
     });
 
+    testWidgets('a new message keeps the built rows mounted', (tester) async {
+      List<NostrEvent> messages(int count) => [
+        for (var i = 0; i < count; i++)
+          _textMsg(
+            id: 'msg$i',
+            pubkey: i.isEven ? 'alice' : 'bob',
+            content: 'Message $i',
+            createdAt: 1000 + i * 600,
+          ),
+      ];
+      final messagesNotifier = _FakeMessagesNotifier(messages(12));
+      await tester.pumpWidget(
+        _buildTestable(messages: const [], messagesNotifier: messagesNotifier),
+      );
+      await tester.pumpAndSettle();
+      final rows = tester.elementList(find.byType(MessageContent)).toList();
+      expect(rows.length, greaterThan(5));
+
+      messagesNotifier.setMessages(messages(13));
+      await tester.pumpAndSettle();
+
+      expect(findRichText('Message 12'), findsOneWidget);
+      // The list anchors the newest row in its own sliver, so only the row
+      // that stops being newest moves sliver and remounts.
+      expect(rows.where((row) => !row.mounted).length, lessThanOrEqualTo(1));
+    });
+
     testWidgets('updates detail page state after joining a channel', (
       tester,
     ) async {

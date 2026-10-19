@@ -30,6 +30,7 @@ class PositionedList extends StatefulWidget {
     required this.itemCount,
     required this.itemBuilder,
     this.separatorBuilder,
+    this.findChildIndexCallback,
     this.controller,
     this.itemPositionsNotifier,
     this.positionedIndex = 0,
@@ -59,6 +60,9 @@ class PositionedList extends StatefulWidget {
   /// If not null, called to build separators for between each item in the list.
   /// Called with 0 <= index < itemCount - 1.
   final IndexedWidgetBuilder? separatorBuilder;
+
+  /// See [ScrollablePositionedList.findChildIndexCallback].
+  final ChildIndexGetter? findChildIndexCallback;
 
   /// An object that can be used to control the position to which this scroll
   /// view is scrolled.
@@ -190,6 +194,11 @@ class _PositionedListState extends State<PositionedList> {
                     childCount: widget.separatorBuilder == null
                         ? widget.positionedIndex
                         : 2 * widget.positionedIndex,
+                    findChildIndexCallback: _findChildIndex(
+                      (index) => index < widget.positionedIndex
+                          ? widget.positionedIndex - (index + 1)
+                          : null,
+                    ),
                     addSemanticIndexes: false,
                     addRepaintBoundaries: widget.addRepaintBoundaries,
                     addAutomaticKeepAlives: widget.addAutomaticKeepAlives,
@@ -206,6 +215,9 @@ class _PositionedListState extends State<PositionedList> {
                       : _buildSeparatedListElement(
                           index + 2 * widget.positionedIndex),
                   childCount: widget.itemCount != 0 ? 1 : 0,
+                  findChildIndexCallback: _findChildIndex(
+                    (index) => index == widget.positionedIndex ? 0 : null,
+                  ),
                   addSemanticIndexes: false,
                   addRepaintBoundaries: widget.addRepaintBoundaries,
                   addAutomaticKeepAlives: widget.addAutomaticKeepAlives,
@@ -225,6 +237,11 @@ class _PositionedListState extends State<PositionedList> {
                     childCount: widget.separatorBuilder == null
                         ? widget.itemCount - widget.positionedIndex - 1
                         : 2 * (widget.itemCount - widget.positionedIndex - 1),
+                    findChildIndexCallback: _findChildIndex(
+                      (index) => index > widget.positionedIndex
+                          ? index - widget.positionedIndex - 1
+                          : null,
+                    ),
                     addSemanticIndexes: false,
                     addRepaintBoundaries: widget.addRepaintBoundaries,
                     addAutomaticKeepAlives: widget.addAutomaticKeepAlives,
@@ -244,13 +261,26 @@ class _PositionedListState extends State<PositionedList> {
   }
 
   Widget _buildItem(int index) {
+    final child = widget.itemBuilder(context, index);
     return RegisteredElementWidget(
-      key: ValueKey(index),
+      key: (widget.findChildIndexCallback == null ? null : child.key) ??
+          ValueKey(index),
+      index: index,
       child: widget.addSemanticIndexes
-          ? IndexedSemantics(
-              index: index, child: widget.itemBuilder(context, index))
-          : widget.itemBuilder(context, index),
+          ? IndexedSemantics(index: index, child: child)
+          : child,
     );
+  }
+
+  /// Maps a key to its child index in one of the three slivers, given a
+  /// function from item index to that sliver's child index.
+  ChildIndexGetter? _findChildIndex(int? Function(int index) sliverIndex) {
+    final find = widget.findChildIndexCallback;
+    if (find == null || widget.separatorBuilder != null) return null;
+    return (key) {
+      final index = find(key);
+      return index == null ? null : sliverIndex(index);
+    };
   }
 
   EdgeInsets get _leadingSliverPadding =>
@@ -328,7 +358,7 @@ class _PositionedListState extends State<PositionedList> {
             anchor = viewport.anchor;
           }
 
-          final ValueKey<int> key = element.widget.key as ValueKey<int>;
+          final index = (element.widget as RegisteredElementWidget).index;
           // Skip this element if `box` has never been laid out.
           if (!box.hasSize) continue;
           if (widget.scrollDirection == Axis.vertical) {
@@ -337,7 +367,7 @@ class _PositionedListState extends State<PositionedList> {
             final itemOffset =
                 reveal - viewport.offset.pixels + anchor * viewport.size.height;
             positions.add(ItemPosition(
-                index: key.value,
+                index: index,
                 itemLeadingEdge: itemOffset.round() /
                     scrollController.position.viewportDimension,
                 itemTrailingEdge: (itemOffset + box.size.height).round() /
@@ -347,7 +377,7 @@ class _PositionedListState extends State<PositionedList> {
                 box.localToGlobal(Offset.zero, ancestor: viewport).dx;
             if (!itemOffset.isFinite) continue;
             positions.add(ItemPosition(
-                index: key.value,
+                index: index,
                 itemLeadingEdge: (widget.reverse
                             ? scrollController.position.viewportDimension -
                                 (itemOffset + box.size.width)

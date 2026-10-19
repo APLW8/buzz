@@ -819,6 +819,7 @@ class _MessageList extends HookConsumerWidget {
       }
     });
 
+    Map<String, int>? rowIndexByKey;
     return Stack(
       children: [
         NotificationListener<Notification>(
@@ -884,6 +885,16 @@ class _MessageList extends HookConsumerWidget {
                 bottom: timelineBottomInset,
               ),
               itemCount: displayEntries.length + (isLoadingOlder.value ? 1 : 0),
+              // A new message shifts every index; find each row by its key so
+              // it keeps its element instead of remounting.
+              findChildIndexCallback: (key) {
+                if (key is! ValueKey<String>) return null;
+                return (rowIndexByKey ??= {
+                  for (var i = 0; i < displayEntries.length; i++)
+                    _messageRowKey(displayEntries[i].first.message.id):
+                        displayEntries.length - 1 - i,
+                })[key.value];
+              },
               itemBuilder: (context, index) {
                 // Loading indicator at the top (last index in reversed list).
                 if (index >= displayEntries.length) {
@@ -940,7 +951,7 @@ class _MessageList extends HookConsumerWidget {
                 return LocalMessageSendTransition(
                   messageId: message.id,
                   channelId: channelId,
-                  key: ValueKey('channel-message-send-${message.id}'),
+                  key: ValueKey(_messageRowKey(message.id)),
                   animate: isRecentLocalMessageSendAnimation(
                     localSendAnimations,
                     message.id,
@@ -1077,3 +1088,5 @@ class _MessageList extends HookConsumerWidget {
     );
   }
 }
+
+String _messageRowKey(String messageId) => 'channel-message-send-$messageId';

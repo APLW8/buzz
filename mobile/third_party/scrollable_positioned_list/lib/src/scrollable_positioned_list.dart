@@ -57,6 +57,7 @@ class ScrollablePositionedList extends StatefulWidget {
     this.addAutomaticKeepAlives = true,
     this.addRepaintBoundaries = true,
     this.minCacheExtent,
+    this.findChildIndexCallback,
   })  : assert(itemCount != null),
         assert(itemBuilder != null),
         itemPositionsNotifier = itemPositionsListener as ItemPositionsNotifier?,
@@ -92,6 +93,7 @@ class ScrollablePositionedList extends StatefulWidget {
         assert(separatorBuilder != null),
         itemPositionsNotifier = itemPositionsListener as ItemPositionsNotifier?,
         scrollOffsetNotifier = scrollOffsetListener as ScrollOffsetNotifier?,
+        findChildIndexCallback = null,
         super(key: key);
 
   /// Number of items the [itemBuilder] can produce.
@@ -104,6 +106,15 @@ class ScrollablePositionedList extends StatefulWidget {
   /// Called to build separators for between each item in the list.
   /// Called with 0 <= index < itemCount - 1.
   final IndexedWidgetBuilder? separatorBuilder;
+
+  /// Called to find the current index of the item with [Key] `key`.
+  ///
+  /// When set, an item whose widget has a key keeps that key in the list, so
+  /// it keeps its element and state when items are inserted before it. Return
+  /// null for a key no item has. Buzz addition; not in upstream 0.3.8.
+  ///
+  /// See [SliverChildBuilderDelegate.findChildIndexCallback].
+  final ChildIndexGetter? findChildIndexCallback;
 
   /// Controller for jumping or scrolling to an item.
   final ItemScrollController? itemScrollController;
@@ -422,6 +433,7 @@ class _ScrollablePositionedListState extends State<ScrollablePositionedList>
                     child: PositionedList(
                       itemBuilder: widget.itemBuilder,
                       separatorBuilder: widget.separatorBuilder,
+                      findChildIndexCallback: widget.findChildIndexCallback,
                       itemCount: widget.itemCount,
                       positionedIndex: primary.target,
                       controller: primary.scrollController,
@@ -452,6 +464,7 @@ class _ScrollablePositionedListState extends State<ScrollablePositionedList>
                       child: PositionedList(
                         itemBuilder: widget.itemBuilder,
                         separatorBuilder: widget.separatorBuilder,
+                        findChildIndexCallback: widget.findChildIndexCallback,
                         itemCount: widget.itemCount,
                         itemPositionsNotifier: secondary.itemPositionsNotifier,
                         positionedIndex: secondary.target,
