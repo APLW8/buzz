@@ -427,16 +427,14 @@ void main() {
         );
         node.owner!.performAction(node.id, ui.SemanticsAction.tap);
         await tester.pumpAndSettle();
-        expect(
-          find.byKey(
-            ValueKey(
-              label == 'Channels options'
-                  ? 'sort-popover-Channels'
-                  : 'section-popover-section-1',
-            ),
-          ),
-          findsOneWidget,
+        // The approved section-view sheet replaces the original popover;
+        // the same accessible button must still open the section controls.
+        final title = tester.widget<Text>(
+          find.byKey(const ValueKey('buzz-sheet-title')),
         );
+        expect(title.data, label == 'Channels options' ? 'Channels' : 'Design');
+        expect(find.text('Sort'), findsOneWidget);
+        expect(find.text('Show'), findsOneWidget);
       } finally {
         semantics.dispose();
       }
