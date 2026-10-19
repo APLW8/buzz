@@ -229,7 +229,7 @@ final mentionCandidatesProvider = Provider.family
         history: ref.watch(mentionHistoryProvider)[args.channelId] ?? const {},
         presence: (key) => presence[key] ?? 'unknown',
       );
-    });
+    }, dependencies: [presentedPresenceProvider]);
 
 /// Picker labels compare every selectable choice, before query ranking
 /// filters them, so a row's label does not change as the query narrows.

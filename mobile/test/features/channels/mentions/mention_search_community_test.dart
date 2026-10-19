@@ -1,3 +1,4 @@
+import 'package:buzz/shared/agents/agents_surface.dart';
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -127,6 +128,25 @@ void main() {
     addTearDown(candidates.close);
     addTearDown(failed.close);
     await container.read(channelsProvider.future);
+  });
+
+  test('picker supports prototype-scoped remote availability', () async {
+    final scoped = ProviderContainer(
+      parent: container,
+      overrides: [
+        availableRemoteAgentsProvider.overrideWithValue({_alice}),
+      ],
+    );
+    addTearDown(scoped.dispose);
+    final provider = mentionCandidatesProvider((
+      channelId: _channelId,
+      query: '',
+      opening: 2,
+    ));
+    final listener = scoped.listen(provider, (_, _) {});
+    addTearDown(listener.close);
+    await scoped.pump();
+    expect(() => scoped.read(provider), returnsNormally);
   });
 
   Future<void> passTypingPause() async {
