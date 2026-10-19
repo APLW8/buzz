@@ -1467,6 +1467,7 @@ async fn query_events_authed(
             let allowed = [
                 "kinds",
                 "authored_thread_replies",
+                "before_id",
                 "since",
                 "until",
                 "limit",
@@ -8007,6 +8008,22 @@ pub(crate) mod postgres_tests {
             events.iter().map(|e| e.id).collect::<Vec<_>>(),
             vec![reply.id]
         );
+        let cursor_body = serde_json::to_vec(&serde_json::json!([{
+            "kinds": [9], "authored_thread_replies": true, "limit": 1,
+            "until": reply.created_at.as_secs(), "before_id": reply.id.to_hex()
+        }]))
+        .unwrap();
+        let (cursor_status, cursor_bytes) = post_query(
+            state.clone(),
+            &host,
+            &owner.public_key().to_hex(),
+            &cursor_body,
+        )
+        .await;
+        assert_eq!(cursor_status, StatusCode::OK);
+        assert!(serde_json::from_slice::<Vec<nostr::Event>>(&cursor_bytes)
+            .unwrap()
+            .is_empty());
         let (status, bytes) =
             post_query(state.clone(), &host, &other.public_key().to_hex(), body).await;
         assert_eq!(status, StatusCode::OK);
