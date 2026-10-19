@@ -7,7 +7,6 @@ import 'package:nostr/nostr.dart' as nostr;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
-import '../shared/community/community.dart';
 import '../shared/community/community_storage.dart';
 import '../shared/deeplink/deep_link.dart';
 import '../shared/hosted/account_identity_store.dart';
@@ -15,7 +14,11 @@ import '../shared/hosted/browser_auth.dart';
 import '../shared/hosted/builderlab_account.dart';
 import '../shared/hosted/hosted_communities.dart';
 import '../shared/hosted/hosted_environment.dart';
-import '../shared/hosted/web_connect_binding.dart';
+import '../shared/hosted/hosted_admission.dart';
+import '../shared/hosted/hosted_backup_service.dart';
+import '../shared/hosted/hosted_community_creation.dart';
+import '../shared/hosted/hosted_relay_auth.dart';
+import '../shared/relay/relay_provider.dart';
 import '../shared/relay/signed_event_relay.dart';
 
 /// Staging-only experiment using the same account and Beekeeper contracts as desktop.
@@ -23,11 +26,18 @@ class RemoteAgentController extends ChangeNotifier {
   RemoteAgentController({
     required this.account,
     required this.browser,
-    required this.keys,
-  });
+    required AccountIdentityStore keys,
+    required this.relayAuth,
+  }) : _keys = keys;
   final BuilderlabAccountClient account;
   final BrowserAuth browser;
-  final AccountIdentityStore keys;
+  final AccountIdentityStore _keys;
+  final HostedRelayAuth relayAuth;
+  AccountIdentityStore get keys {
+    final subject = account.account?.subject;
+    return subject == null ? _keys : _keys.forSubject(subject);
+  }
+
   final _subscriptions = <StreamSubscription<dynamic>>[];
   bool busy = false;
   int _operation = 0;
@@ -104,12 +114,13 @@ class RemoteAgentController extends ChangeNotifier {
   });
 
   Future<void> refresh() async {
-    owner = (await keys.read())?.pubkey;
     final session = account.account;
     if (session == null) {
       status = 'Sign in to your staging BuilderLab account.';
       return;
     }
+    await adoptBoundIdentity();
+    owner = (await keys.read())?.pubkey;
     _scope =
         'remote-prototype:${HostedEnvironment.origin.host}:${session.subject}';
     final prefs = await SharedPreferences.getInstance();
@@ -141,12 +152,10 @@ class RemoteAgentController extends ChangeNotifier {
 
   Future<void> createTestCommunity() => run(() async {
     await ensureBinding();
-    final response = await account.post('/v1/buzz/communities', {
-      'name': 'tomb-remote-prototype-20261016',
-    });
-    if (response['error'] != null) {
-      throw StateError('Staging community creation was not confirmed.');
-    }
+    final subject = account.account!.subject;
+    await HostedCreateCommunity(
+      'tomb-remote-prototype-20261016',
+    ).provision(account, owner!, () => account.account?.subject == subject);
     await refresh();
     if (communities.isEmpty) {
       throw StateError(
@@ -165,84 +174,38 @@ class RemoteAgentController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> ensureBinding() async {
+  /// Migrate only a locally saved key confirmed by the current server binding.
+  /// Keep the original record and refuse account/key replacement.
+  Future<void> adoptBoundIdentity() async {
     final subject = account.account?.subject;
-    final identity = await keys.read();
-    if (subject == null || identity == null) {
-      throw StateError(
-        'Sign in and transfer your existing Buzz identity first.',
-      );
+    if (subject == null) throw AccountFailure.signedOut;
+    final scoped = _keys.forSubject(subject);
+    final response = await account.currentIdentity();
+    if (account.account?.subject != subject) {
+      throw AccountFailure.differentAccount;
     }
-    final current = await account.currentIdentity();
-    final bound = (current['identity'] as Map?)?['pubkey_hex'];
-    if (bound == identity.pubkey) return;
-    if (bound != null) {
-      throw StateError(
-        'This account is bound to a different Buzz identity. Nothing was replaced.',
-      );
+    if (response['error'] != null) throw AccountFailure.invalidResponse;
+    final bound = (response['identity'] as Map?)?['pubkey_hex'];
+    final local = await scoped.read();
+    if (local != null) {
+      if (bound != local.pubkey) throw AccountIdentityFailure.mismatch;
+      return;
     }
-    if (current['error'] != null &&
-        (current['error'] as Map)['setup_needed'] != true) {
-      throw StateError(
-        'BuilderLab could not verify the existing identity binding.',
-      );
-    }
-    final challenge = await account.post(
-      '/v1/buzz/nostr-identities/challenge',
-      {'origin': HostedEnvironment.origin.toString()},
+    if (bound is! String) throw AccountIdentityFailure.absent;
+    await scoped.adoptSaved(
+      bound,
+      checkCurrent: () {
+        if (account.account?.subject != subject) {
+          throw AccountFailure.differentAccount;
+        }
+      },
     );
-    final fields = <String, String>{
-      'audience': 'buzz:nostr-identity',
-      'action': 'bind_nostr_identity',
-      'protocol': 'buzz-nostr-identity',
-      'version': '1',
-      'return': 'browser_fragment_v1',
-      'callback_url': HostedEnvironment.origin.resolve('/buzz').toString(),
-    };
-    for (final field in [
-      'challenge_id',
-      'nonce',
-      'verification_code',
-      'origin',
-      'expires_at',
-    ]) {
-      if (challenge[field] is! String) {
-        throw StateError('Invalid identity challenge.');
-      }
-      fields[field] = challenge[field] as String;
-    }
-    final request = parseNostrBindDeepLink(
-      Uri(scheme: 'buzz', host: 'nostr-bind', queryParameters: fields),
-    );
-    if (request == null) throw StateError('Invalid identity challenge.');
-    await WebConnectBindingService().complete(
-      request: request,
-      subject: subject,
-      expectedPubkey: identity.pubkey,
-      withKeys: keys.withKeys,
-      verify:
-          ({
-            required subject,
-            required challengeId,
-            required nonce,
-            required signedPayload,
-          }) async {
-            if (account.account?.subject != subject) {
-              throw StateError('Account changed.');
-            }
-            final result = await account
-                .post('/v1/buzz/nostr-identities/verify', {
-                  'challenge_id': challengeId,
-                  'nonce': nonce,
-                  'signed_payload': signedPayload,
-                });
-            final key = (result['identity'] as Map?)?['pubkey_hex'];
-            if (key is! String) {
-              throw StateError('Identity binding was not confirmed.');
-            }
-            return key;
-          },
-    );
+  }
+
+  Future<void> ensureBinding() async {
+    await adoptBoundIdentity();
+    owner = (await keys.read())?.pubkey;
+    if (owner == null) throw AccountIdentityFailure.absent;
   }
 
   Future<void> _savePending(Map<String, dynamic> value) async {
@@ -313,6 +276,9 @@ class RemoteAgentController extends ChangeNotifier {
     await keys.withKeys((key) async {
       await submitSignedEventOnce(
         wsUrl: selected.relayUrl,
+        headers: await relayAuth.headers(
+          RelayConfig(baseUrl: selected.relayUrl, nsec: key.nsec),
+        ),
         nsec: key.nsec,
         kind: 30177,
         content: jsonEncode({
@@ -354,25 +320,32 @@ class RemoteAgentController extends ChangeNotifier {
   Future<void> saveCommunity() async {
     final selected = community;
     if (selected == null) throw StateError('Choose a community first.');
-    await keys.withKeys((key) async {
+    final subject = account.account?.subject;
+    if (subject == null || owner == null) throw AccountFailure.signedOut;
+    await HostedBackupService(
+      account,
+      keys,
+    ).backup(isCurrent: () => account.account?.subject == subject);
+    final admission = HostedAdmission(
+      account: account,
+      store: _keys,
+      relayAuth: relayAuth,
+    );
+    try {
+      final prepared = await admission.prepare(selected, subject, owner!);
       final storage = CommunityStorage();
       final existing = (await storage.loadAll())
           .where((c) => c.relayUrl == selected.relayUrl)
           .firstOrNull;
-      if (existing != null && existing.pubkey != key.public) {
+      if (existing != null && existing.pubkey != prepared.pubkey) {
         throw StateError('Saved community has another identity.');
       }
-      final saved =
-          existing ??
-          Community.create(
-            name: selected.name,
-            relayUrl: selected.relayUrl,
-            nsec: key.nsec,
-            pubkey: key.public,
-          );
+      final saved = existing ?? prepared;
       await storage.save(saved);
       await storage.saveActiveId(saved.id);
-    });
+    } finally {
+      admission.dispose();
+    }
   }
 
   @override
@@ -381,7 +354,6 @@ class RemoteAgentController extends ChangeNotifier {
       unawaited(subscription.cancel());
     }
     unawaited(browser.dispose());
-    account.dispose();
     super.dispose();
   }
 }

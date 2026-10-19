@@ -12,7 +12,7 @@ import 'prototype/remote_agent_controller.dart';
 import 'prototype/simulator_browser.dart';
 import 'shared/hosted/account_identity_store.dart';
 import 'shared/hosted/browser_auth.dart';
-import 'shared/hosted/builderlab_account.dart';
+import 'shared/hosted/hosted_relay_auth.dart';
 import 'shared/identity_transfer/nsec_import_sheet.dart';
 import 'shared/theme/app_theme.dart';
 import 'shared/theme/grid.dart';
@@ -38,7 +38,8 @@ class RemotePrototype extends HookConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final controller = useMemoized(
       () => RemoteAgentController(
-        account: BuilderlabAccountClient(),
+        account: ref.read(builderlabAccountProvider),
+        relayAuth: ref.read(hostedRelayAuthProvider),
         browser: BrowserAuth(
           openBrowser: kDebugMode ? openSimulatorChrome : null,
         ),
