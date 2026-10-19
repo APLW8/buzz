@@ -8,6 +8,15 @@ import 'package:buzz/shared/crypto/event_signer.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  try {
+    await runProbe();
+  } catch (error) {
+    debugPrint('SIGNING_PROBE FAILED: $error');
+    rethrow;
+  }
+}
+
+Future<void> runProbe() async {
   if (!Platform.isIOS) throw StateError('This probe requires an iOS Runner');
   final results = <String>[];
   final key = '0' * 63 + '3';

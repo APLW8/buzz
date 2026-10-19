@@ -24,6 +24,10 @@ for ((attempt = 0; attempt < 90; attempt++)); do
   xcrun simctl spawn "$device" log show --last 5m --style compact \
     --predicate "processIdentifier == $probe_pid AND eventMessage CONTAINS \"SIGNING_PROBE\"" \
     > "$fixture/probe.log" 2>/dev/null
+  if grep -q 'SIGNING_PROBE FAILED:' "$fixture/probe.log"; then
+    cat "$fixture/probe.log"
+    exit 1
+  fi
   if grep -q 'SIGNING_PROBE COMPLETE' "$fixture/probe.log"; then
     cat "$fixture/probe.log"
     exit 0
