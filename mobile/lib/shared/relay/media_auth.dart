@@ -46,6 +46,10 @@ class MediaGetAuthService {
   final String? _nsec;
   final DateTime Function() _now;
 
+  // Prepared only after a scoped request. Never shared across service/account
+  // lifetimes; background requests return it for reuse by the next queued job.
+  nostr.Keys? _signingIdentity;
+
   Map<String, String>? _cachedHeaders;
   DateTime? _refreshAt;
   // Includes the running job. Bound retained work during rapid history scrolls.
@@ -90,12 +94,15 @@ class MediaGetAuthService {
     final released = Completer<void>();
     final result = _signingTail.then((_) async {
       try {
-        return await compute(_mediaHeadersInBackground, (
+        final signed = await compute(_mediaHeadersInBackground, (
           baseUrl: _baseUrl,
           nsec: nsec,
+          identity: _signingIdentity,
           url: url,
           now: _now(),
         ), debugLabel: 'media-get-auth');
+        _signingIdentity ??= signed.identity;
+        return signed.headers;
       } finally {
         // A failed worker must propagate to its fetch without blocking later
         // requests in the queue.
@@ -192,10 +199,13 @@ class MediaGetAuthService {
   }
 
   nostr.Event _buildGetAuthEvent(String nsec) {
-    final privkeyHex = nostr.Nip19.decode(payload: nsec).data;
+    final privkeyHex =
+        _signingIdentity?.secret ?? nostr.Nip19.decode(payload: nsec).data;
     if (privkeyHex.isEmpty) {
       throw Exception('Invalid nsec');
     }
+
+    final identity = _signingIdentity ??= nostr.Keys(privkeyHex);
 
     final expiration =
         (_now().millisecondsSinceEpoch ~/ 1000) + _mediaGetAuthLifetimeSeconds;
@@ -210,19 +220,31 @@ class MediaGetAuthService {
       kind: _mediaGetAuthKind,
       content: 'Get buzz-media',
       tags: tags,
-      secretKey: privkeyHex,
+      secretKey: identity.secret,
+      pubkey: identity.public,
       verify: false,
     );
   }
 }
 
-Map<String, String> _mediaHeadersInBackground(
-  ({String baseUrl, String nsec, String url, DateTime now}) request,
-) => MediaGetAuthService(
-  baseUrl: request.baseUrl,
-  nsec: request.nsec,
-  now: () => request.now,
-).headersFor(request.url);
+({Map<String, String> headers, nostr.Keys? identity}) _mediaHeadersInBackground(
+  ({
+    String baseUrl,
+    String nsec,
+    nostr.Keys? identity,
+    String url,
+    DateTime now,
+  })
+  request,
+) {
+  final service = MediaGetAuthService(
+    baseUrl: request.baseUrl,
+    nsec: request.nsec,
+    now: () => request.now,
+  ).._signingIdentity = request.identity;
+  final headers = service.headersFor(request.url);
+  return (headers: headers, identity: service._signingIdentity);
+}
 
 final mediaGetAuthServiceProvider = Provider<MediaGetAuthService>((ref) {
   final config = ref.watch(relayConfigProvider);
