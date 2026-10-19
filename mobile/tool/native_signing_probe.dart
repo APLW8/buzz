@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:nostr/nostr.dart' as nostr;
 import 'package:buzz/shared/relay/media_auth.dart';
@@ -7,6 +8,7 @@ import 'package:buzz/shared/crypto/event_signer.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (!Platform.isIOS) throw StateError('This probe requires an iOS Runner');
   final results = <String>[];
   final key = '0' * 63 + '3';
   final nsec = nostr.Nip19.encode(prefix: nostr.Nip19Prefix.nsec, data: key);
@@ -86,12 +88,16 @@ Future<void> main() async {
     '32 complete NIP98 headers: ${queryWatch.elapsedMicroseconds} us',
   );
   for (final header in headers) {
-    nostr.Event.fromJson(utf8.decode(base64Decode(header.split(' ').last)));
+    final event = nostr.Event.fromJson(
+      utf8.decode(base64Decode(header.split(' ').last)),
+    );
+    if (!event.isValid()) throw StateError('Invalid query proof');
   }
   results.add('query signatures: PASS');
   for (final result in results) {
     debugPrint('SIGNING_PROBE $result');
   }
+  debugPrint('SIGNING_PROBE COMPLETE');
   runApp(
     MaterialApp(
       home: Scaffold(body: SafeArea(child: Text(results.join('\n')))),
