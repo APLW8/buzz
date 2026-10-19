@@ -1,4 +1,4 @@
-import 'package:buzz/features/channels/channel_sort/channel_sort_storage.dart';
+import 'package:buzz/shared/widgets/app_list.dart';
 import 'package:nostr/nostr.dart' as nostr;
 import 'package:buzz/features/channels/channel_filter/channel_filter_provider.dart';
 import 'package:buzz/features/channels/channel_filter/channel_filter_manager.dart';
@@ -226,13 +226,10 @@ void main() {
       await tester.tap(find.byTooltip('Channels options'));
       await tester.pumpAndSettle();
       expect(find.text('general'), findsNothing);
-      final all = tester.widget<SegmentedButton<ChannelFilterMode>>(
-        find.ancestor(
-          of: find.text('All'),
-          matching: find.byType(SegmentedButton<ChannelFilterMode>),
-        ),
+      final all = tester.widget<AppListRow>(
+        find.ancestor(of: find.text('All'), matching: find.byType(AppListRow)),
       );
-      expect(all.onSelectionChanged, isNull);
+      expect(all.onTap, isNull);
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Show hidden channels · 1'));
@@ -272,13 +269,13 @@ void main() {
       expect(manager.store.windowFor('channels'), 7 * 86400);
       await tester.tap(find.byTooltip('Channels options'));
       await tester.pumpAndSettle();
-      final days = tester.widget<SegmentedButton<int>>(
+      final days = tester.widget<AppListRow>(
         find.ancestor(
           of: find.text('7 days'),
-          matching: find.byType(SegmentedButton<int>),
+          matching: find.byType(AppListRow),
         ),
       );
-      expect(days.selected, {7});
+      expect(days.trailing, isA<Icon>());
       await tester.tap(find.text('All'));
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
@@ -323,13 +320,13 @@ void main() {
         ),
         findsOneWidget,
       );
-      final selected = tester.widget<SegmentedButton<int>>(
+      final selected = tester.widget<AppListRow>(
         find.ancestor(
           of: find.text('7 days'),
-          matching: find.byType(SegmentedButton<int>),
+          matching: find.byType(AppListRow),
         ),
       );
-      expect(selected.selected, {7});
+      expect(selected.trailing, isA<Icon>());
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
       expect(find.byType(AlertDialog), findsNothing);
@@ -475,13 +472,10 @@ void main() {
     expect(find.text('A–Z'), findsOneWidget);
     expect(find.text('Show'), findsOneWidget);
     expect(find.byType(AlertDialog), findsNothing);
-    final alpha = tester.widget<SegmentedButton<ChannelSortMode>>(
-      find.ancestor(
-        of: find.text('A–Z'),
-        matching: find.byType(SegmentedButton<ChannelSortMode>),
-      ),
+    final alpha = tester.widget<AppListRow>(
+      find.ancestor(of: find.text('A–Z'), matching: find.byType(AppListRow)),
     );
-    expect(alpha.selected, {ChannelSortMode.alpha});
+    expect(alpha.trailing, isA<Icon>());
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
 

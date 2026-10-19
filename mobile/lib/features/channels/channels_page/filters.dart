@@ -132,57 +132,36 @@ class _SectionViewSheet extends HookConsumerWidget {
       Map<T, String> values,
       T selected,
       ValueChanged<T>? change,
-    ) => Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    ) => AppListCard(
+      label: label,
+      dividerIndent: Grid.xs,
       children: [
-        Text(label, style: context.textTheme.titleSmall),
-        const SizedBox(height: Grid.xxs),
-        SegmentedButton<T>(
-          segments: [
-            for (final entry in values.entries)
-              ButtonSegment(value: entry.key, label: Text(entry.value)),
-          ],
-          selected: {selected},
-          showSelectedIcon: false,
-          direction: MediaQuery.textScalerOf(context).scale(14) > 20
-              ? Axis.vertical
-              : Axis.horizontal,
-          expandedInsets: MediaQuery.textScalerOf(context).scale(14) > 20
-              ? null
-              : EdgeInsets.zero,
-          style: ButtonStyle(
-            foregroundColor: WidgetStateProperty.resolveWith(
-              (states) => states.contains(WidgetState.disabled)
-                  ? context.colors.onSurface.withValues(alpha: 0.5)
-                  : states.contains(WidgetState.selected)
-                  ? context.colors.onSurface
-                  : context.colors.onSurfaceVariant,
-            ),
-            backgroundColor: WidgetStateProperty.resolveWith(
-              (states) => states.contains(WidgetState.selected)
-                  ? context.colors.surface
-                  : context.colors.onSurface.withValues(alpha: 0.06),
-            ),
-            side: WidgetStatePropertyAll(
-              BorderSide(color: context.colors.outline.withValues(alpha: 0.25)),
-            ),
-            shape: WidgetStatePropertyAll(
-              RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(Radii.sm),
-              ),
-            ),
-            padding: const WidgetStatePropertyAll(
-              EdgeInsets.symmetric(horizontal: Grid.xxs, vertical: Grid.twelve),
+        for (final entry in values.entries)
+          Semantics(
+            checked: entry.key == selected,
+            inMutuallyExclusiveGroup: true,
+            enabled: change != null,
+            child: AppListRow(
+              key: ValueKey('section-choice-$label-${entry.value}'),
+              title: entry.value,
+              trailing: entry.key == selected
+                  ? Icon(
+                      BuzzIcons.check,
+                      size: 18,
+                      color: context.colors.primary,
+                    )
+                  : null,
+              titleColor: change == null
+                  ? context.colors.onSurfaceVariant
+                  : null,
+              onTap: change == null
+                  ? null
+                  : () {
+                      dirty.value = true;
+                      change(entry.key);
+                    },
             ),
           ),
-          onSelectionChanged: change == null
-              ? null
-              : (selection) {
-                  dirty.value = true;
-                  change(selection.single);
-                },
-        ),
-        const SizedBox(height: Grid.xs),
       ],
     );
     return PopScope(
@@ -193,33 +172,20 @@ class _SectionViewSheet extends HookConsumerWidget {
             maxHeight: MediaQuery.sizeOf(context).height * 0.85,
           ),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(
-              Grid.gutter,
-              Grid.xxs,
-              Grid.gutter,
-              Grid.twelve,
-            ),
+            padding: const EdgeInsets.only(bottom: Grid.twelve),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        title,
-                        style: context.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: 'Close',
-                      onPressed: saving.value ? null : () => close(),
-                      icon: const Icon(Icons.close),
-                    ),
-                  ],
+                BuzzSheetHeader(
+                  title: title,
+                  trailing: saving.value
+                      ? const IconButton(
+                          tooltip: 'Saving…',
+                          onPressed: null,
+                          icon: Icon(BuzzIcons.x),
+                        )
+                      : null,
                 ),
-                const SizedBox(height: Grid.xxs),
                 Flexible(
                   child: SingleChildScrollView(
                     child: Column(
@@ -297,34 +263,37 @@ class _SectionViewSheet extends HookConsumerWidget {
                   ),
                 ),
                 const SizedBox(height: Grid.xxs),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: Wrap(
-                    alignment: WrapAlignment.end,
-                    spacing: Grid.xxs,
-                    runSpacing: Grid.xxs,
-                    children: [
-                      TextButton(
-                        onPressed: saving.value ? null : () => close(),
-                        child: const Text('Cancel'),
-                      ),
-                      FilledButton(
-                        style: FilledButton.styleFrom(
-                          backgroundColor: context.colors.onSurface,
-                          foregroundColor: context.colors.surface,
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: Grid.gutter),
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: Wrap(
+                      alignment: WrapAlignment.end,
+                      spacing: Grid.xxs,
+                      runSpacing: Grid.xxs,
+                      children: [
+                        TextButton(
+                          onPressed: saving.value ? null : () => close(),
+                          child: const Text('Cancel'),
                         ),
-                        onPressed: saving.value || manager?.busy == true
-                            ? null
-                            : apply,
-                        child: Text(
-                          saving.value
-                              ? 'Saving…'
-                              : failed.value
-                              ? 'Retry'
-                              : 'Apply',
+                        FilledButton(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: context.colors.onSurface,
+                            foregroundColor: context.colors.surface,
+                          ),
+                          onPressed: saving.value || manager?.busy == true
+                              ? null
+                              : apply,
+                          child: Text(
+                            saving.value
+                                ? 'Saving…'
+                                : failed.value
+                                ? 'Retry'
+                                : 'Apply',
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ],

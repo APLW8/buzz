@@ -25,6 +25,7 @@ import '../../shared/community/paired_community_landing.dart';
 import '../../shared/community/community_membership_provider.dart';
 import '../../shared/widgets/app_list_card_item.dart';
 import '../../shared/widgets/app_list.dart';
+import '../../shared/widgets/buzz_sheet_header.dart';
 import '../../shared/widgets/app_list_card.dart';
 import '../../shared/relay/relay.dart';
 import '../../shared/theme/theme.dart';
