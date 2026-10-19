@@ -192,6 +192,9 @@ jobs:
       - name: Test
         if: matrix.lane == 'native'
         run: swift test --package-path mobile/ios/BuzzPushKit
+      - name: Test native event signing through Dart FFI
+        if: matrix.lane == 'native'
+        run: /bin/bash scripts/test-mobile-native-signing.sh
       - name: Test native pagination geometry
         if: matrix.lane == 'native'
         run: /bin/bash scripts/test-mobile-pagination.sh
