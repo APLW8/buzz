@@ -226,7 +226,14 @@ class BuilderlabAccountClient {
     String? signingKey,
     String? expectedSubject,
   }) {
-    if (!RegExp(r'^/v1/buzz(/[a-z0-9_-]+)+$').hasMatch(path)) {
+    const agentRoutes = {
+      '/v3/beekeeper/register-agent',
+      '/v3/beekeeper/attest-agent',
+      '/v3/beekeeper/list-agents',
+      '/v3/beekeeper/add-buzz-subscription',
+    };
+    if (!RegExp(r'^/v1/buzz(/[a-z0-9_-]+)+$').hasMatch(path) &&
+        !agentRoutes.contains(path)) {
       throw ArgumentError.value(path, 'path', 'not a /v1/buzz/ route');
     }
     return _serial(() async {

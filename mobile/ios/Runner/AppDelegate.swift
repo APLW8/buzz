@@ -68,6 +68,17 @@ import os.log
     }
 
     let messenger = engineBridge.applicationRegistrar.messenger()
+    #if DEBUG && targetEnvironment(simulator)
+    if Bundle.main.bundleIdentifier == "xyz.block.buzz.dev.mobile.remoteprototype" {
+      let prototypeIdentity = FlutterMethodChannel(name: "buzz/prototype_identity", binaryMessenger: messenger)
+      prototypeIdentity.setMethodCallHandler { call, result in
+        guard call.method == "take" else { result(FlutterMethodNotImplemented); return }
+        let key = getenv("BUZZ_PROTOTYPE_NSEC").map { String(cString: $0) }
+        unsetenv("BUZZ_PROTOTYPE_NSEC")
+        result(key)
+      }
+    }
+    #endif
     identityFilePlugin = IdentityFilePlugin(messenger: messenger)
     browserAuthBridge = BuzzBrowserAuthBridge(messenger: messenger)
     hostedHpkeChannel = FlutterMethodChannel(name: "buzz/hosted_hpke", binaryMessenger: messenger)
