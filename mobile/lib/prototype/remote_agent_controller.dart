@@ -12,7 +12,7 @@ import '../shared/deeplink/deep_link.dart';
 import '../shared/hosted/account_identity_store.dart';
 import '../shared/hosted/browser_auth.dart';
 import '../shared/hosted/builderlab_account.dart';
-import '../shared/hosted/hosted_communities.dart';
+import 'owned_communities.dart';
 import '../shared/hosted/hosted_environment.dart';
 import '../shared/hosted/hosted_admission.dart';
 import '../shared/hosted/hosted_backup_service.dart';
@@ -133,7 +133,7 @@ class RemoteAgentController extends ChangeNotifier {
       return;
     }
     await ensureBinding();
-    communities = await loadHostedCommunities(account);
+    communities = await loadPrototypeOwnedCommunities(account);
     final selected =
         pending?['community'] ?? prefs.getString('$_scope:community');
     community = communities.where((c) => c.relayUrl == selected).firstOrNull;
@@ -322,6 +322,25 @@ class RemoteAgentController extends ChangeNotifier {
     if (selected == null) throw StateError('Choose a community first.');
     final subject = account.account?.subject;
     if (subject == null || owner == null) throw AccountFailure.signedOut;
+    await ensureBinding();
+    final storage = CommunityStorage();
+    final existing = (await storage.loadAll())
+        .where((c) => c.relayUrl == selected.relayUrl)
+        .firstOrNull;
+    if (existing != null) {
+      // Reopen an already admitted community, as normal saved-community startup
+      // does. New-community backup requirements must not replace its identity.
+      if (existing.pubkey != owner ||
+          existing.nsec == null ||
+          AccountIdentityStore.publicKeyForNsec(existing.nsec!) != owner) {
+        throw AccountIdentityFailure.mismatch;
+      }
+      if (account.account?.subject != subject) {
+        throw AccountFailure.differentAccount;
+      }
+      await storage.saveActiveId(existing.id);
+      return;
+    }
     await HostedBackupService(
       account,
       keys,
@@ -333,16 +352,8 @@ class RemoteAgentController extends ChangeNotifier {
     );
     try {
       final prepared = await admission.prepare(selected, subject, owner!);
-      final storage = CommunityStorage();
-      final existing = (await storage.loadAll())
-          .where((c) => c.relayUrl == selected.relayUrl)
-          .firstOrNull;
-      if (existing != null && existing.pubkey != prepared.pubkey) {
-        throw StateError('Saved community has another identity.');
-      }
-      final saved = existing ?? prepared;
-      await storage.save(saved);
-      await storage.saveActiveId(saved.id);
+      await storage.save(prepared);
+      await storage.saveActiveId(prepared.id);
     } finally {
       admission.dispose();
     }

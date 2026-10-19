@@ -1,3 +1,7 @@
+import 'package:buzz/shared/community/community.dart';
+import 'package:buzz/shared/community/community_storage.dart';
+import 'package:buzz/shared/deeplink/deep_link.dart';
+
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:buzz/shared/hosted/account_identity_store.dart';
 import 'package:buzz/shared/hosted/builderlab_account.dart';
@@ -62,6 +66,54 @@ void main() {
     account.dispose();
   });
 
+  for (final matching in [true, false]) {
+    test('saved community preserves identity; matching=$matching', () async {
+      final key = nostr.Keys('0' * 63 + '1');
+      final other = nostr.Keys('0' * 63 + '2');
+      final store = AccountIdentityStore();
+      await store.create(key.nsec);
+      final account = BoundAccount(key.public);
+      final auth = HostedRelayAuth(account);
+      final controller = RemoteAgentController(
+        account: account,
+        browser: BrowserAuth(),
+        keys: store,
+        relayAuth: auth,
+      );
+      final savedKey = matching ? key : other;
+      final saved = Community.create(
+        name: 'prototype',
+        relayUrl: 'wss://prototype.communities.public.builderlabstaging.xyz',
+        nsec: savedKey.nsec,
+        pubkey: savedKey.public,
+      );
+      final storage = CommunityStorage();
+      await storage.save(saved);
+      controller.owner = key.public;
+      controller.community = AddCommunityDeepLink(
+        name: saved.name,
+        relayUrl: saved.relayUrl,
+      );
+      if (matching) {
+        await controller.saveCommunity();
+        expect(await storage.loadActiveId(), saved.id);
+      } else {
+        await expectLater(
+          controller.saveCommunity(),
+          throwsA(AccountIdentityFailure.mismatch),
+        );
+        expect(await storage.loadActiveId(), isNull);
+      }
+      expect((await storage.loadAll()).single.nsec, savedKey.nsec);
+      expect(
+        (await store.forSubject('prototype-owner').read())!.pubkey,
+        key.public,
+      );
+      controller.dispose();
+      auth.dispose();
+      account.dispose();
+    });
+  }
   test('owner proof verifies for only the provisioned agent key', () {
     final owner = nostr.Keys('0' * 63 + '1');
     final agent = nostr.Keys('0' * 63 + '2');
