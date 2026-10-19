@@ -30,7 +30,7 @@ import '../../shared/custom_emoji/custom_emoji_provider.dart';
 import '../../shared/custom_emoji/custom_emoji_render.dart';
 import '../../shared/emoji/emoji_data_provider.dart';
 import '../../shared/emoji/emoji_only.dart';
-import 'channels_provider.dart';
+import 'channel_ids_by_name_provider.dart';
 import 'local_send_bubble_surface.dart';
 import 'media_viewer_page.dart';
 import 'message_content/link_normalizer.dart';
@@ -100,6 +100,9 @@ class MessageContent extends HookConsumerWidget {
 
   /// Distinguishes messages authored by the signed-in identity.
   final bool ownMessage;
+
+  /// Lets an adjacent day divider own spacing after the final text segment.
+  final bool trimTrailingSpacing;
 
   /// Marks the final message in a sender run for rounded corners and dots.
   final bool bubbleEnd;
@@ -171,6 +174,7 @@ class MessageContent extends HookConsumerWidget {
     required this.content,
     this.bubble = false,
     this.ownMessage = false,
+    this.trimTrailingSpacing = false,
     this.bubbleEnd = true,
     this.bubbleStart = true,
     this.hasReactions = false,
@@ -220,11 +224,7 @@ class MessageContent extends HookConsumerWidget {
     };
     final resolvedChannelNames = channelNames.isNotEmpty
         ? channelNames
-        : <String, String>{
-            for (final channel
-                in ref.watch(channelsProvider).asData?.value ?? const [])
-              channel.name.toLowerCase(): channel.id,
-          };
+        : ref.watch(channelIdsByNameProvider);
     final channelHandler = useRef(onChannelTap)..value = onChannelTap;
     final resolvedChannelTap = useMemoized(
       () => (String channelId) {
@@ -395,7 +395,9 @@ class MessageContent extends HookConsumerWidget {
         : const <({String text, bool attachment})>[];
     final markdown = bubble
         ? Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: ownMessage
+                ? CrossAxisAlignment.end
+                : CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
               for (final (index, segment) in segments.indexed)
@@ -413,7 +415,14 @@ class MessageContent extends HookConsumerWidget {
                 else
                   Padding(
                     key: ValueKey('message-text-bubble-$index'),
-                    padding: const EdgeInsets.only(bottom: Grid.quarter),
+                    padding: EdgeInsets.only(
+                      bottom:
+                          trimTrailingSpacing &&
+                              trailingGallery == null &&
+                              index == segments.length - 1
+                          ? 0
+                          : Grid.quarter,
+                    ),
                     child: LocalSendBubbleSurface(
                       color: ownMessage
                           ? chatColors.outgoing
@@ -479,7 +488,9 @@ class MessageContent extends HookConsumerWidget {
     if (trailingGallery == null) return markdown;
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: ownMessage
+          ? CrossAxisAlignment.end
+          : CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
         if (trailingGallery.content.trim().isNotEmpty) markdown,
@@ -493,6 +504,7 @@ class MessageContent extends HookConsumerWidget {
               trailingGallery.items.map((item) => item.url).join('\u0000'),
             ),
             items: trailingGallery.items,
+            mirrored: ownMessage,
             leadingOverflow: mediaCarouselLeadingOverflow,
             trailingOverflow: mediaCarouselTrailingOverflow,
             onReply: onMediaReply,

@@ -288,7 +288,9 @@ async fn mint_invite_checked(
             true, // invites always require NIP-98; no X-Pubkey dev fallback
             true, // POST bodies must be covered by a payload tag
         ),
-    ) {
+    )
+    .await
+    {
         Ok(a) => a,
         Err(resp) => return resp,
     };
