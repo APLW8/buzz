@@ -1,4 +1,6 @@
 import 'package:buzz/prototype/agents_sheet.dart';
+import 'package:buzz/features/profile/user_profile_sheet.dart';
+import 'package:buzz/shared/mentions/agent_identity_provider.dart';
 import 'package:buzz/shared/relay/relay.dart';
 import 'package:nostr/nostr.dart' as nostr;
 import 'package:buzz/prototype/create_agent_sheet.dart';
@@ -108,6 +110,55 @@ void main() {
       expect(container.read(presenceCacheProvider)['remote'], 'offline');
     },
   );
+
+  testWidgets('agent detail pushes inside one modal and Back restores list', (
+    tester,
+  ) async {
+    final account = BuilderlabAccountClient();
+    final controller = _Controller(account);
+    addTearDown(() {
+      controller.dispose();
+      controller.relayAuth.dispose();
+      account.dispose();
+    });
+    final pubkey = 'a' * 64;
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          agentDirectoryProvider.overrideWith(
+            (ref) async => [AgentDirectoryEntry(pubkey: pubkey)],
+          ),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.light(),
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: TextButton(
+                onPressed: () => showPrototypeAgents(context, controller),
+                child: const Text('Open Agents'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Open Agents'));
+    await tester.pumpAndSettle();
+    final list = tester.element(find.byType(PrototypeAgentsSheet));
+    await tester.tap(find.byKey(ValueKey(pubkey)));
+    await tester.pumpAndSettle();
+    expect(find.byType(BottomSheet), findsOneWidget);
+    expect(find.byType(UserProfileSheet), findsOneWidget);
+    expect(list.mounted, isTrue);
+    await tester.tap(find.byTooltip('Back'));
+    await tester.pumpAndSettle();
+    expect(find.byType(UserProfileSheet), findsNothing);
+    expect(find.byKey(ValueKey(pubkey)), findsOneWidget);
+    expect(tester.element(find.byType(PrototypeAgentsSheet)), same(list));
+    await tester.tap(find.byTooltip('Close'));
+    await tester.pumpAndSettle();
+    expect(find.byType(BottomSheet), findsNothing);
+  });
 
   for (final succeed in [true, false]) {
     testWidgets(
