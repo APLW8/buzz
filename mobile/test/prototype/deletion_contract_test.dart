@@ -99,8 +99,8 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('Delete agent'), findsOneWidget);
-      await tester.tap(find.text('Delete agent'));
+      expect(find.text('Delete'), findsOneWidget);
+      await tester.tap(find.text('Delete'));
       await tester.pumpAndSettle();
       expect(find.text('Delete Scout?'), findsOneWidget);
       expect(registry.calls, isEmpty);

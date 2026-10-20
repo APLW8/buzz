@@ -101,7 +101,7 @@ class DeleteAgentAction extends HookConsumerWidget {
                 borderRadius: BorderRadius.circular(Radii.dialog),
               ),
             ),
-            child: Text(controller.busy ? 'Working…' : 'Delete agent'),
+            child: Text(controller.busy ? 'Working…' : 'Delete'),
           ),
           if (error.value != null)
             Text(error.value!, style: TextStyle(color: context.colors.error)),
