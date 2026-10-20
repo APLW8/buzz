@@ -4460,6 +4460,7 @@ class _CompletedPairingNotifier extends PairingNotifier {
 ChannelFilterManager _filterTestManager({
   ChannelFilterStore? cached,
   bool failPublish = false,
+  VoidCallback? onPublish,
 }) {
   final keys = nostr.Keys.generate();
   final crypto = ChannelSortCrypto(keys.nsec, keys.public);
@@ -4471,6 +4472,7 @@ ChannelFilterManager _filterTestManager({
     cache: (_) {},
     fetch: () async => history,
     publish: (content, at) async {
+      onPublish?.call();
       if (failPublish) throw StateError('rejected');
       history = [
         NostrEvent.fromJson(

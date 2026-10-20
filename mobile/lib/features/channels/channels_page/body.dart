@@ -418,32 +418,25 @@ class _SliverChannelsList extends HookConsumerWidget {
                       ],
                     ),
                   );
-                  if (confirmed == true) {
+                  if (confirmed == true && context.mounted) {
+                    // Local section removal must work without filter-read/write
+                    // authority. Cleanup is optional for this never-reused ID.
+                    ref
+                        .read(channelSectionsProvider.notifier)
+                        .deleteSection(section.id);
                     try {
-                      if (filters == null) {
-                        throw StateError('Filters unavailable');
-                      }
-                      await filters.save(
-                        sectionSortGroupKey(section.id),
-                        ChannelFilterMode.all,
-                        removeWindow: true,
-                      );
+                      await filters?.clearDeletedSection(section.id);
                     } catch (_) {
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
                             content: Text(
-                              'Could not reset the section filter. Retry deleting the section.',
+                              'Section deleted. Its saved filter could not be cleared.',
                             ),
                           ),
                         );
                       }
-                      return;
                     }
-                    if (!context.mounted) return;
-                    ref
-                        .read(channelSectionsProvider.notifier)
-                        .deleteSection(section.id);
                   }
                 },
                 onMoveUp: () => ref

@@ -100,9 +100,40 @@ class ChannelFilterManager extends ChangeNotifier {
     ChannelFilterMode mode, {
     int? windowSeconds,
     bool removeWindow = false,
+  }) => _save(
+    group,
+    mode,
+    windowSeconds: windowSeconds,
+    removeWindow: removeWindow,
+  );
+
+  /// Best-effort cleanup after local deletion. Section IDs are never reused;
+  /// failure leaves an unreachable preference, never blocks the local action.
+  Future<void> clearDeletedSection(String sectionId) async {
+    final group = 'section:$sectionId';
+    if (store.modeFor(group) == ChannelFilterMode.all &&
+        !(store.toJson()['activeWindowSeconds'] as Map? ?? {}).containsKey(
+          group,
+        )) {
+      return;
+    }
+    await _save(
+      group,
+      ChannelFilterMode.all,
+      removeWindow: true,
+      deletedSection: true,
+    );
+  }
+
+  Future<void> _save(
+    String group,
+    ChannelFilterMode mode, {
+    int? windowSeconds,
+    bool removeWindow = false,
+    bool deletedSection = false,
   }) async {
     if (_disposed || !ready || busy) throw StateError('Filters are read-only');
-    if (isGroupLive?.call(group) == false) {
+    if (!deletedSection && isGroupLive?.call(group) == false) {
       throw StateError('Section no longer exists');
     }
     busy = true;
@@ -118,7 +149,7 @@ class ChannelFilterManager extends ChangeNotifier {
       );
       _notify();
       final fresh = await _read();
-      if (isGroupLive?.call(group) == false) {
+      if (!deletedSection && isGroupLive?.call(group) == false) {
         throw StateError('Section no longer exists');
       }
       final next = fresh.edit(
