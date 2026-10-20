@@ -6,6 +6,7 @@ import 'package:buzz/prototype/create_agent_sheet.dart';
 import 'package:buzz/prototype/remote_agent_controller.dart';
 import 'package:buzz/shared/agents/agents_surface.dart';
 import 'package:buzz/shared/community/community.dart';
+import 'package:buzz/shared/community/community_avatar.dart';
 import 'package:buzz/shared/community/community_provider.dart';
 import 'package:buzz/shared/deeplink/deep_link.dart';
 import 'package:buzz/shared/deeplink/pending_deep_link_provider.dart';
@@ -122,7 +123,13 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        expect(find.text('Create in Test community'), findsOneWidget);
+        expect(find.text('Create agent'), findsOneWidget);
+        expect(find.text('Create in Test community'), findsNothing);
+        final indicator = tester.widget<CommunityAvatar>(
+          find.byType(CommunityAvatar),
+        );
+        expect(indicator.name, 'Test community');
+        expect(indicator.relayUrl, 'wss://test.example');
         expect(find.byType(AvatarImage), findsOneWidget);
         expect(controller.submittedName, isNull);
         await tester.enterText(

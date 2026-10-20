@@ -4,6 +4,7 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 import '../shared/community/community.dart';
 import '../shared/community/community_provider.dart';
+import '../shared/community/community_avatar.dart';
 import '../shared/deeplink/deep_link.dart';
 import '../shared/theme/theme.dart';
 import '../shared/widgets/buzz_titled_sheet_layout.dart';
@@ -137,9 +138,7 @@ class CreatePrototypeAgentSheet extends HookConsumerWidget {
           bottom: MediaQuery.viewInsetsOf(context).bottom,
         ),
         child: BuzzTitledSheetLayout(
-          title: avatar == null
-              ? 'Create agent'
-              : 'Create in ${community.name}',
+          title: 'Create agent',
           leading: IconButton(
             tooltip: 'Cancel',
             style: actionStyle,
@@ -169,6 +168,18 @@ class CreatePrototypeAgentSheet extends HookConsumerWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 if (avatarUrl != null) ...[
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: Semantics(
+                      label: 'Current community: ${community.name}',
+                      child: CommunityAvatar(
+                        name: community.name,
+                        relayUrl: community.relayUrl,
+                        size: Grid.md,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: Grid.xs),
                   Center(
                     child: AvatarImage(
                       imageUrl: avatarUrl,

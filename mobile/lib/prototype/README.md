@@ -50,7 +50,7 @@ prototype's 1–64 letter/number/space/dot/hyphen/underscore contract.
 Both cold-start Camera links and warm external hyperlinks use the existing
 app-link queue. Dispatch waits for signed-in app/account and current-community
 hydration. Name and instructions are editable, avatar is read-only, and the
-header names the destination community. A community change prevents submission.
+form shows the destination community avatar without a community-name heading. A community change prevents submission.
 Only the default remote provider is used. No QR signing or QR-generator UI is
 included. Signed-out users must sign in and reopen the link; unfinished agent
 setup must be resumed before opening a new draft.
