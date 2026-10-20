@@ -20,3 +20,6 @@ BUZZ_APP_ATTEST_ENVIRONMENT = production
 
 // Keep the Dart FFI entry points visible in the app executable.
 OTHER_LDFLAGS = $(inherited) -Wl,-u,_buzz_signer_create -Wl,-u,_buzz_signer_sign -Wl,-u,_buzz_signer_destroy
+
+// Preserve runtime-looked-up FFI exports during archive/install stripping.
+STRIP_STYLE = non-global

@@ -256,7 +256,11 @@ jobs:
           cd mobile && flutter build ios --release --no-codesign --no-pub
           # Flutter does not support Release mode on the simulator. Check the
           # actual device Release executable's exported symbols separately.
-          nm -gU build/ios/iphoneos/Buzz.app/Buzz > /tmp/buzz-release-symbols
+          # Archive applies install-time stripping that a plain build omits.
+          xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner \
+            -configuration Release -destination 'generic/platform=iOS' \
+            -archivePath /tmp/BuzzSigning.xcarchive CODE_SIGNING_ALLOWED=NO archive
+          nm -gU /tmp/BuzzSigning.xcarchive/Products/Applications/Buzz.app/Buzz > /tmp/buzz-release-symbols
           for symbol in buzz_signer_create buzz_signer_sign buzz_signer_destroy; do
             grep -Eq "[[:space:]]_${symbol}$" /tmp/buzz-release-symbols
           done
