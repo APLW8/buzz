@@ -19,6 +19,7 @@ import '../shared/hosted/hosted_backup_service.dart';
 import '../shared/hosted/hosted_community_creation.dart';
 import '../shared/hosted/hosted_relay_auth.dart';
 import '../shared/relay/relay_provider.dart';
+import '../shared/relay/nostr_models.dart';
 import '../shared/storage/secure_storage.dart';
 import '../shared/relay/signed_event_relay.dart';
 
@@ -49,6 +50,119 @@ class RemoteAgentController extends ChangeNotifier {
   List<Map<String, dynamic>> agents = [];
   Map<String, dynamic>? pending;
   String? _scope;
+  Set<String> deletedAgents = {};
+
+  String get _deletionScope {
+    final subject = account.account?.subject;
+    if (subject == null) throw AccountFailure.signedOut;
+    return 'remote-prototype:${HostedEnvironment.origin.host}:$subject';
+  }
+
+  /// Deletes an owned runtime only after its selected-community registration
+  /// is accepted as deleted and a fresh relay read confirms its absence.
+  Future<bool> deleteAgent({
+    required String pubkey,
+    required AddCommunityDeepLink selected,
+    required String communityOwner,
+    required bool Function() isCurrent,
+    required Future<List<NostrEvent>> Function(NostrFilter) fetch,
+  }) => run(() async {
+    final subject = account.account?.subject;
+    final scope = _deletionScope;
+    void check() {
+      if (!isCurrent() || account.account?.subject != subject) {
+        throw StateError('Community or account changed. Reopen Agents.');
+      }
+    }
+
+    check();
+    await ensureBinding();
+    check();
+    if (owner != communityOwner) throw AccountIdentityFailure.mismatch;
+    final agent = agents
+        .where((row) => row['agent_pubkey'] == pubkey)
+        .firstOrNull;
+    final id = agent?['agent_id'];
+    if (id is! String || id.isEmpty) {
+      throw StateError('Owned remote agent ID is unavailable. Refresh Agents.');
+    }
+    if (pending != null) {
+      throw StateError('Finish pending agent setup before deleting an agent.');
+    }
+    final prefs = await SharedPreferences.getInstance();
+    check();
+    final tombstones = prefs.getStringList('$scope:deleting')?.toSet() ?? {};
+    tombstones.add(pubkey);
+    if (!await prefs.setStringList('$scope:deleting', tombstones.toList())) {
+      throw StateError('Could not save deletion intent. Retry Delete.');
+    }
+    final retries = Map<String, dynamic>.from(
+      jsonDecode(prefs.getString('$scope:delete-retries') ?? '{}') as Map,
+    );
+    retries[pubkey] = {...agent!, 'deletion_community': selected.relayUrl};
+    if (!await prefs.setString('$scope:delete-retries', jsonEncode(retries))) {
+      throw StateError('Could not save deletion retry. Retry Delete.');
+    }
+    check();
+    await removePolicy(selected, pubkey);
+    check();
+    final remaining = await fetch(
+      NostrFilter(
+        kinds: const [30177],
+        authors: [communityOwner],
+        tags: {
+          '#d': [pubkey],
+        },
+      ),
+    );
+    check();
+    if (remaining.isNotEmpty) {
+      throw StateError('Community registration still exists. Retry Delete.');
+    }
+    final result = await account.post('/v3/beekeeper/delete-agent', {
+      'agent_id': id,
+    });
+    check();
+    final status = result['status'];
+    if (status != 1 &&
+        status != 3 &&
+        status != 'DELETE_AGENT_STATUS_DELETED' &&
+        status != 'DELETE_AGENT_STATUS_NOT_FOUND') {
+      throw StateError(
+        status == 2 || status == 'DELETE_AGENT_STATUS_DISABLED'
+            ? 'Agent deletion is disabled on this server.'
+            : 'Agent deletion was not confirmed. Retry Delete.',
+      );
+    }
+    final completed = {...deletedAgents, pubkey};
+    if (!await prefs.setStringList('$scope:deleted', completed.toList())) {
+      throw StateError(
+        'Runtime deleted, but local cleanup failed. Retry Delete.',
+      );
+    }
+    deletedAgents = completed;
+    retries.remove(pubkey);
+    await prefs.setString('$scope:delete-retries', jsonEncode(retries));
+    agents = agents.where((row) => row['agent_pubkey'] != pubkey).toList();
+    this.status = 'Remote agent deleted.';
+  });
+
+  /// Removes only this owner's registration in the selected community.
+  Future<void> removePolicy(AddCommunityDeepLink selected, String pubkey) =>
+      keys.withKeys((key) async {
+        await submitSignedEventOnce(
+          wsUrl: selected.relayUrl,
+          headers: await relayAuth.headers(
+            RelayConfig(baseUrl: selected.relayUrl, nsec: key.nsec),
+          ),
+          nsec: key.nsec,
+          kind: 5,
+          content: '',
+          tags: [
+            ['a', '30177:${key.public}:$pubkey'],
+          ],
+        );
+      });
 
   Future<void> initialize() async {
     if (HostedEnvironment.origin.host != 'app.builderlabstaging.xyz') {
@@ -127,6 +241,7 @@ class RemoteAgentController extends ChangeNotifier {
     _scope =
         'remote-prototype:${HostedEnvironment.origin.host}:${session.subject}';
     final prefs = await SharedPreferences.getInstance();
+    deletedAgents = prefs.getStringList('$_scope:deleted')?.toSet() ?? {};
     final raw = prefs.getString('$_scope:pending');
     pending = raw == null
         ? null
@@ -157,6 +272,21 @@ class RemoteAgentController extends ChangeNotifier {
     final rows = result['agents'] ?? [];
     if (rows is! List) throw StateError('Invalid agent listing.');
     agents = rows.map((row) => Map<String, dynamic>.from(row as Map)).toList();
+    final retries = Map<String, dynamic>.from(
+      jsonDecode(prefs.getString('$_scope:delete-retries') ?? '{}') as Map,
+    );
+    for (final retry in retries.values) {
+      final row = Map<String, dynamic>.from(retry as Map);
+      if (!deletedAgents.contains(row['agent_pubkey']) &&
+          !agents.any(
+            (agent) => agent['agent_pubkey'] == row['agent_pubkey'],
+          )) {
+        agents.add(row);
+      }
+    }
+    agents = agents
+        .where((row) => !deletedAgents.contains(row['agent_pubkey']))
+        .toList();
     status = pending == null
         ? 'Signed in. Choose a community and create an agent.'
         : 'Unfinished setup saved. Resume to use the same agent.';
@@ -324,6 +454,11 @@ class RemoteAgentController extends ChangeNotifier {
     Map<String, dynamic> setup,
   ) async {
     final pubkey = setup['pubkey'] as String;
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getStringList('$_deletionScope:deleting')?.contains(pubkey) ==
+        true) {
+      throw StateError('Agent deletion is pending. Retry Delete.');
+    }
     await keys.withKeys((key) async {
       await submitSignedEventOnce(
         wsUrl: selected.relayUrl,

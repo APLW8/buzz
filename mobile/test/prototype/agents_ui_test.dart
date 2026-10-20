@@ -146,11 +146,32 @@ void main() {
     await tester.pumpAndSettle();
     final list = tester.element(find.byType(PrototypeAgentsSheet));
     await tester.tap(find.byKey(ValueKey(pubkey)));
+    await tester.pump();
+    for (var frame = 0; frame < 3; frame++) {
+      await tester.pump(const Duration(milliseconds: 60));
+      final surface = find.byKey(const ValueKey('agent-detail-surface'));
+      expect(tester.widget<Material>(surface).color?.a, 1);
+      expect(
+        tester.getSize(surface),
+        tester.getSize(find.byType(Navigator).last),
+      );
+      expect(tester.takeException(), isNull);
+    }
     await tester.pumpAndSettle();
     expect(find.byType(BottomSheet), findsOneWidget);
     expect(find.byType(UserProfileSheet), findsOneWidget);
     expect(list.mounted, isTrue);
     await tester.tap(find.byTooltip('Back'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 60));
+    expect(
+      tester
+          .widget<Material>(find.byKey(const ValueKey('agent-detail-surface')))
+          .color
+          ?.a,
+      1,
+    );
+    expect(tester.takeException(), isNull);
     await tester.pumpAndSettle();
     expect(find.byType(UserProfileSheet), findsNothing);
     expect(find.byKey(ValueKey(pubkey)), findsOneWidget);

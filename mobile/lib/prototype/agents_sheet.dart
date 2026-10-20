@@ -18,6 +18,7 @@ import '../shared/widgets/avatar_image.dart';
 import '../shared/widgets/buzz_titled_sheet_layout.dart';
 import '../shared/widgets/modal_presentation.dart';
 import 'create_agent_sheet.dart';
+import 'delete_agent_action.dart';
 import 'remote_agent_controller.dart';
 
 /// Opens a community-scoped Agents navigation stack inside one modal.
@@ -56,32 +57,48 @@ class _AgentsNavigation extends HookConsumerWidget {
         child: Navigator(
           key: navigator,
           onGenerateRoute: (_) => MaterialPageRoute<void>(
-            builder: (listContext) => PrototypeAgentsSheet(
-              controller: controller,
-              onClose: () => Navigator.of(context).pop(),
-              onSelect: (pubkey) async {
-                final channel = await Navigator.of(listContext).push<Channel>(
-                  MaterialPageRoute(
-                    builder: (detailContext) => BuzzTitledSheetLayout(
-                      title: 'Agent',
-                      leading: IconButton(
-                        tooltip: 'Back',
-                        icon: const Icon(Icons.arrow_back_ios_new),
-                        onPressed: () => Navigator.of(detailContext).pop(),
+            builder: (listContext) => Material(
+              color: context.colors.surface,
+              child: PrototypeAgentsSheet(
+                controller: controller,
+                onClose: () => Navigator.of(context).pop(),
+                onSelect: (pubkey) async {
+                  final channel = await Navigator.of(listContext).push<Channel>(
+                    MaterialPageRoute(
+                      builder: (detailContext) => Material(
+                        key: const ValueKey('agent-detail-surface'),
+                        color: context.colors.surface,
+                        child: SizedBox.expand(
+                          child: BuzzTitledSheetLayout(
+                            title: 'Agent',
+                            leading: IconButton(
+                              tooltip: 'Back',
+                              icon: const Icon(Icons.arrow_back_ios_new),
+                              onPressed: () =>
+                                  Navigator.of(detailContext).pop(),
+                            ),
+                            trailing: IconButton(
+                              tooltip: 'Close',
+                              icon: const Icon(Icons.close),
+                              onPressed: () => Navigator.of(context).pop(),
+                            ),
+                            child: UserProfileSheet(
+                              pubkey: pubkey,
+                              contextualActions: (_) => DeleteAgentAction(
+                                controller: controller,
+                                pubkey: pubkey,
+                              ),
+                            ),
+                          ),
+                        ),
                       ),
-                      trailing: IconButton(
-                        tooltip: 'Close',
-                        icon: const Icon(Icons.close),
-                        onPressed: () => Navigator.of(context).pop(),
-                      ),
-                      child: UserProfileSheet(pubkey: pubkey),
                     ),
-                  ),
-                );
-                if (channel != null && context.mounted) {
-                  Navigator.of(context).pop(channel);
-                }
-              },
+                  );
+                  if (channel != null && context.mounted) {
+                    Navigator.of(context).pop(channel);
+                  }
+                },
+              ),
             ),
           ),
         ),
@@ -137,7 +154,7 @@ class PrototypeAgentsSheet extends HookConsumerWidget {
       ...?registered.data,
       for (final entry in directory.asData?.value ?? <AgentDirectoryEntry>[])
         entry.pubkey,
-    }.toList();
+    }.where((key) => !controller.deletedAgents.contains(key)).toList();
     final names = watchIdentityNames(
       ref,
       keys,
