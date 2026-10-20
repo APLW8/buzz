@@ -6,6 +6,24 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nostr/nostr.dart' as nostr;
 
 void main() {
+  test('production event constructors use the shared signer', () {
+    final bypasses = Directory('lib')
+        .listSync(recursive: true)
+        .whereType<File>()
+        .where(
+          (file) =>
+              file.path.endsWith('.dart') &&
+              file.path != 'lib/shared/crypto/event_signer.dart',
+        )
+        .where(
+          (file) => RegExp(
+            r'\bEvent\s*\.\s*from\s*\(',
+          ).hasMatch(file.readAsStringSync()),
+        )
+        .map((file) => file.path)
+        .toList();
+    expect(bypasses, isEmpty);
+  });
   final library = Platform.environment['BUZZ_SIGNER_LIBRARY'];
   final native = library == null
       ? null

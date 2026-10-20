@@ -5,6 +5,9 @@ import 'package:nostr/nostr.dart' as nostr;
 import 'package:buzz/shared/relay/media_auth.dart';
 import 'package:buzz/shared/relay/relay_session.dart';
 import 'package:buzz/shared/crypto/event_signer.dart';
+import 'package:buzz/shared/deeplink/deep_link.dart';
+import 'package:buzz/shared/hosted/web_connect_binding.dart';
+import 'package:buzz/shared/hosted/hosted_environment.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -101,6 +104,54 @@ Future<void> runProbe() async {
     if (!event.isValid()) throw StateError('Invalid query proof');
   }
   results.add('query signatures: PASS');
+  final keys = nostr.Keys(key);
+  final binding = parseNostrBindDeepLink(
+    Uri(
+      scheme: 'buzz',
+      host: 'nostr-bind',
+      queryParameters: {
+        'challenge_id': '12345678-1234-1234-1234-123456789012',
+        'nonce': 'a' * 43,
+        'verification_code': '123456',
+        'audience': 'buzz:nostr-identity',
+        'action': 'bind_nostr_identity',
+        'protocol': 'buzz-nostr-identity',
+        'version': '1',
+        'origin': HostedEnvironment.origin.toString(),
+        'expires_at': '2099-01-01T00:00:00Z',
+        'return': 'browser_fragment_v1',
+        'callback_url': HostedEnvironment.origin.resolve('/buzz').toString(),
+      },
+    ),
+  )!;
+  var bindingVerified = false;
+  final returned = await WebConnectBindingService().complete(
+    request: binding,
+    subject: 'synthetic-account',
+    expectedPubkey: keys.public,
+    withKeys: <T>(Future<T> Function(nostr.Keys) operation) => operation(keys),
+    verify:
+        ({
+          required subject,
+          required challengeId,
+          required nonce,
+          required signedPayload,
+        }) async {
+          final event = nostr.Event.fromJson(signedPayload);
+          if (event.kind != 24243 ||
+              event.pubkey != keys.public ||
+              !event.isValid()) {
+            throw StateError('Invalid hosted binding proof');
+          }
+          bindingVerified = true;
+          return keys.public;
+        },
+  );
+  if (!bindingVerified ||
+      returned != HostedEnvironment.origin.resolve('/buzz')) {
+    throw StateError('Hosted binding did not verify before browser return');
+  }
+  results.add('hosted binding signature and browser return: PASS');
   for (final result in results) {
     debugPrint('SIGNING_PROBE $result');
   }
