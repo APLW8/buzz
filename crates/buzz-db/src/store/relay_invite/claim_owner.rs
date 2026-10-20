@@ -101,7 +101,8 @@ pub async fn claim_relay_membership_with_owner(
     role: &str,
     policy_version: Option<&str>,
     verified_owner: Option<&str>,
-) -> Result<MembershipClaimResult> {
+    relay_keypair: &nostr::Keys,
+) -> Result<super::MembershipWrite<MembershipClaimResult>> {
     let mut tx = crate::begin_community_write_transaction(
         pool,
         community,
@@ -138,10 +139,18 @@ pub async fn claim_relay_membership_with_owner(
     }
 
     let owner = persist_claim_owner(tx.conn(), community, pubkey, verified_owner).await?;
+    let snapshot = if inserted {
+        Some(super::write_nip43_membership_snapshot(&mut tx, relay_keypair).await?)
+    } else {
+        None
+    };
     tx.commit().await?;
-    Ok(MembershipClaimResult {
-        inserted,
-        owner_link_created: owner.link_created,
-        users_created: owner.users_created,
+    Ok(super::MembershipWrite {
+        outcome: MembershipClaimResult {
+            inserted,
+            owner_link_created: owner.link_created,
+            users_created: owner.users_created,
+        },
+        snapshot,
     })
 }

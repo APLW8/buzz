@@ -1,3 +1,4 @@
+use super::revocation_postgres_tests::claim_relay_invite_outcome;
 use super::*;
 
 #[tokio::test]
@@ -22,7 +23,8 @@ async fn failed_policy_evidence_rolls_back_verified_owner_and_membership() {
         &hash_v2_code(&invite.code),
         &claimant,
         Some("too-short"),
-        Some(&owner)
+        Some(&owner),
+        &nostr::Keys::generate()
     )
     .await
     .is_err());
@@ -32,7 +34,8 @@ async fn failed_policy_evidence_rolls_back_verified_owner_and_membership() {
         &claimant,
         "member",
         Some("too-short"),
-        Some(&owner)
+        Some(&owner),
+        &nostr::Keys::generate()
     )
     .await
     .is_err());
@@ -70,20 +73,37 @@ async fn successful_claim_reports_only_committed_user_creation() {
     .await
     .unwrap();
     let hash = hash_v2_code(&invite.code);
-    let first =
-        claim_relay_invite_with_owner(&pool, community, &hash, &claimant, None, Some(&owner))
-            .await
-            .unwrap();
-    assert!(matches!(first.outcome, ClaimOutcome::Joined { .. }));
-    assert!(first.owner_link_created);
-    assert_eq!(first.users_created, 2);
-    let retry =
-        claim_relay_invite_with_owner(&pool, community, &hash, &claimant, None, Some(&owner))
-            .await
-            .unwrap();
-    assert!(matches!(retry.outcome, ClaimOutcome::AlreadyMember { .. }));
-    assert!(!retry.owner_link_created);
-    assert_eq!(retry.users_created, 0);
+    let first = claim_relay_invite_with_owner(
+        &pool,
+        community,
+        &hash,
+        &claimant,
+        None,
+        Some(&owner),
+        &nostr::Keys::generate(),
+    )
+    .await
+    .unwrap();
+    assert!(matches!(first.outcome.outcome, ClaimOutcome::Joined { .. }));
+    assert!(first.outcome.owner_link_created);
+    assert_eq!(first.outcome.users_created, 2);
+    let retry = claim_relay_invite_with_owner(
+        &pool,
+        community,
+        &hash,
+        &claimant,
+        None,
+        Some(&owner),
+        &nostr::Keys::generate(),
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        retry.outcome.outcome,
+        ClaimOutcome::AlreadyMember { .. }
+    ));
+    assert!(!retry.outcome.owner_link_created);
+    assert_eq!(retry.outcome.users_created, 0);
     let legacy_agent = postgres_tests::test_pubkey();
     let legacy = claim_relay_membership_with_owner(
         &pool,
@@ -92,11 +112,12 @@ async fn successful_claim_reports_only_committed_user_creation() {
         "member",
         None,
         Some(&owner),
+        &nostr::Keys::generate(),
     )
     .await
     .unwrap();
-    assert!(legacy.inserted && legacy.owner_link_created);
-    assert_eq!(legacy.users_created, 1);
+    assert!(legacy.outcome.inserted && legacy.outcome.owner_link_created);
+    assert_eq!(legacy.outcome.users_created, 1);
     let retry = claim_relay_membership_with_owner(
         &pool,
         community,
@@ -104,11 +125,12 @@ async fn successful_claim_reports_only_committed_user_creation() {
         "member",
         None,
         Some(&owner),
+        &nostr::Keys::generate(),
     )
     .await
     .unwrap();
-    assert!(!retry.inserted && !retry.owner_link_created);
-    assert_eq!(retry.users_created, 0);
+    assert!(!retry.outcome.inserted && !retry.outcome.owner_link_created);
+    assert_eq!(retry.outcome.users_created, 0);
 }
 
 #[tokio::test]
@@ -124,7 +146,7 @@ async fn issuer_timeout_denies_temporarily_without_revoking_invite() {
     sqlx::query("INSERT INTO community_bans (community_id,pubkey,muted_until,actor_pubkey) VALUES ($1,$2,clock_timestamp()+interval '1 hour',$2)")
         .bind(community.as_uuid()).bind(hex::decode(&issuer).unwrap()).execute(&pool).await.unwrap();
     assert_eq!(
-        claim_relay_invite(
+        claim_relay_invite_outcome(
             &pool,
             community,
             &hash_v2_code(&invite.code),
@@ -146,7 +168,7 @@ async fn issuer_timeout_denies_temporarily_without_revoking_invite() {
     sqlx::query("UPDATE community_bans SET muted_until=clock_timestamp()-interval '1 second' WHERE community_id=$1")
         .bind(community.as_uuid()).execute(&pool).await.unwrap();
     assert!(matches!(
-        claim_relay_invite(
+        claim_relay_invite_outcome(
             &pool,
             community,
             &hash_v2_code(&invite.code),

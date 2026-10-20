@@ -63,3 +63,6 @@ membership in `pg_read_all_stats`, or an ephemeral superuser as CI uses.
 The runner creates one desired-state source database per invocation and clones
 it for ordinary tests. Migration-mode tests start empty. Cleanup retries
 transient disconnect races before reporting a warning.
+
+Invite migration-upgrade tests also execute the operator repair script with
+`psql`; make sure the PostgreSQL client is installed and resolves on `PATH`.

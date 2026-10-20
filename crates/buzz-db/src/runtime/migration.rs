@@ -729,18 +729,32 @@ mod postgres_tests {
             .as_str()
             .contains("CREATE TABLE community_nip_fi_issuers"));
         assert_eq!(migrations[66].version, 67);
-        assert!(migrations[66]
-            .sql
-            .as_str()
-            .contains("ADD COLUMN legacy_admission BOOLEAN NOT NULL DEFAULT true"));
-        for function in [
-            include_str!("../../../../schema/functions/invite_admission_lock.sql"),
-            include_str!("../../../../schema/functions/backfill_invite_revocations.sql"),
-        ] {
-            let normalized = normalize_sql(function);
-            assert!(normalize_sql(migrations[66].sql.as_str()).contains(&normalized));
-            assert!(normalize_sql(&desired_schema).contains(&normalized));
-        }
+        let invite_migration = strip_sql_comments(migrations[66].sql.as_str());
+        assert!(invite_migration.contains("SET LOCAL lock_timeout = '5s'"));
+        assert!(invite_migration.contains("SET LOCAL statement_timeout = '30s'"));
+        assert!(
+            invite_migration.contains("ADD COLUMN legacy_admission BOOLEAN NOT NULL DEFAULT true")
+        );
+        assert!(invite_migration.contains("ADD COLUMN revoked_at TIMESTAMPTZ"));
+        assert!(!invite_migration.to_ascii_uppercase().contains("UPDATE "));
+        assert!(!invite_migration
+            .to_ascii_uppercase()
+            .contains("CREATE FUNCTION"));
+        assert!(!desired_schema.contains("invite_admission_lock"));
+        assert!(!desired_schema.contains("backfill_invite_revocations"));
+
+        let invite_repair =
+            include_str!("../../../../scripts/maintenance/backfill_invite_revocations.sql");
+        assert!(invite_repair.contains("pg_advisory_xact_lock_shared"));
+        assert!(invite_repair.contains("'invite-admission:'"));
+        assert!(invite_repair.contains("deletion_state = 'active' AND deleted_at IS NULL"));
+        assert!(invite_repair.contains("LIMIT 500"));
+        assert!(invite_repair.contains("FOR UPDATE OF invite"));
+        assert!(invite_repair.contains("COMMIT;"));
+        assert!(invite_repair.contains("SELECT count(*) AS unrepaired_invites"));
+        assert!(!invite_repair
+            .to_ascii_uppercase()
+            .contains("CREATE FUNCTION"));
         assert_eq!(migrations[58].version, 59);
         assert!(migrations[58].sql.as_str().contains("buzz.push_enabled"));
         assert_eq!(migrations[59].version, 60);

@@ -182,12 +182,28 @@ all serving pods and retain it on compatible rollbacks; rolling back to a versio
 without this setting's enforcement restores legacy acceptance until natural expiry.
 This change does not choose or deploy a cutoff.
 
-Before applying the invitation migration, operators must reconcile any
-previously applied invitation migration version. Legacy owner attribution uses
-the agent's currently recorded `agent_owner_pubkey`; deleting an owner user row
-out of band clears that link through its foreign key, so a later repair cannot
-recover the former relationship. Reconcile before any external user-row
-cleanup that could erase this provenance.
+Migration 0067 is an expand step: it adds `revoked_at` and
+`legacy_admission`, and does not rewrite existing invite rows. Before applying
+it, reconcile any previously applied invitation migration version with the
+schema and migration history. For the rollout, pause invitation minting and
+claiming and ban lifts; apply migration 0067; deploy the new relay and drain all
+old writers; then run the fenced historical repair while admission remains
+paused:
+
+```bash
+psql -X -v ON_ERROR_STOP=1 -f scripts/maintenance/backfill_invite_revocations.sql
+```
+
+Resume minting, claiming, and ban lifts only after the script reports zero
+unrepaired invites and only new relay code is serving. The repair is bounded
+and idempotent; rerun it after interruption before reopening admission. A
+community outside the active state is skipped and remains fenced. A rollback
+to code that ignores `revoked_at` also requires invitation admission to remain
+paused. Legacy owner attribution uses the agent's currently recorded
+`agent_owner_pubkey`; deleting an owner user row out of band clears that link
+through its foreign key, so a later repair cannot recover the former
+relationship. Reconcile before any external user-row cleanup that could erase
+this provenance.
 
 ### 4. Smoke test the CLI against the relay
 

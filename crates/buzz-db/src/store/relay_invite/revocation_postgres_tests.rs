@@ -2,6 +2,25 @@ use super::*;
 use crate::moderation::{ban_member, unban_member};
 use uuid::Uuid;
 
+pub(super) async fn claim_relay_invite_outcome(
+    pool: &PgPool,
+    community: CommunityId,
+    token_hash: &[u8; 32],
+    claimer: &str,
+    policy_version: Option<&str>,
+) -> Result<ClaimOutcome> {
+    super::claim_relay_invite(
+        pool,
+        community,
+        token_hash,
+        claimer,
+        policy_version,
+        &nostr::Keys::generate(),
+    )
+    .await
+    .map(|write| write.outcome)
+}
+
 pub(super) async fn fixture() -> (PgPool, CommunityId, String, String) {
     let pool = PgPool::connect(&crate::test_support::database_url())
         .await
@@ -50,7 +69,7 @@ async fn ban_permanently_revokes_issued_invites_but_not_another_tenant() {
         .await
         .unwrap());
     assert_eq!(
-        claim_relay_invite(
+        claim_relay_invite_outcome(
             &pool,
             community,
             &hash_v2_code(&invite.code),
@@ -62,7 +81,7 @@ async fn ban_permanently_revokes_issued_invites_but_not_another_tenant() {
         ClaimOutcome::Revoked
     );
     assert!(matches!(
-        claim_relay_invite(
+        claim_relay_invite_outcome(
             &pool,
             other,
             &hash_v2_code(&unaffected.code),
@@ -77,7 +96,7 @@ async fn ban_permanently_revokes_issued_invites_but_not_another_tenant() {
         .await
         .unwrap();
     assert!(matches!(
-        claim_relay_invite(
+        claim_relay_invite_outcome(
             &pool,
             community,
             &hash_v2_code(&renewed.code),
@@ -101,7 +120,7 @@ async fn nonmember_restrictions_cover_both_claim_formats_and_owner() {
         .await
         .unwrap();
     assert_eq!(
-        claim_relay_invite(
+        claim_relay_invite_outcome(
             &pool,
             community,
             &hash_v2_code(&invite.code),
@@ -113,8 +132,15 @@ async fn nonmember_restrictions_cover_both_claim_formats_and_owner() {
         ClaimOutcome::Restricted
     );
     assert!(matches!(
-        crate::relay_members::claim_relay_membership(&pool, community, &claimant, "member", None)
-            .await,
+        crate::relay_members::claim_relay_membership(
+            &pool,
+            community,
+            &claimant,
+            "member",
+            None,
+            &nostr::Keys::generate()
+        )
+        .await,
         Err(crate::DbError::InviteRestricted)
     ));
     let agent = hex::encode([4; 32]);
@@ -129,7 +155,7 @@ async fn nonmember_restrictions_cover_both_claim_formats_and_owner() {
         .await
         .unwrap();
     assert_eq!(
-        claim_relay_invite(&pool, community, &hash_v2_code(&invite.code), &agent, None)
+        claim_relay_invite_outcome(&pool, community, &hash_v2_code(&invite.code), &agent, None)
             .await
             .unwrap(),
         ClaimOutcome::Restricted
@@ -173,7 +199,7 @@ async fn issuer_agent_revocation_survives_owner_unban() {
         .await
         .unwrap();
     assert_eq!(
-        claim_relay_invite(
+        claim_relay_invite_outcome(
             &pool,
             community,
             &hash_v2_code(&invite.code),
@@ -291,16 +317,20 @@ async fn stalled_production_mint_ignores_lifted_history_and_later_audit_touches(
         .unwrap();
     }
 
-    assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT backfill_invite_revocations()")
+    super::upgrade_postgres_tests::run_invite_repair_script(&pool).await;
+    let revoked: Option<chrono::DateTime<chrono::Utc>> =
+        sqlx::query_scalar("SELECT revoked_at FROM relay_invites WHERE community_id=$1 AND id=$2")
+            .bind(community.as_uuid())
+            .bind(invite.invite_id)
             .fetch_one(&pool)
             .await
-            .unwrap(),
-        0,
-        "lifted restrictions and later audit writes do not revoke a new row"
+            .unwrap();
+    assert!(
+        revoked.is_none(),
+        "lifted history and late audits spare new rows"
     );
     assert!(matches!(
-        claim_relay_invite(
+        claim_relay_invite_outcome(
             &pool,
             community,
             &hash_v2_code(&invite.code),
@@ -340,16 +370,21 @@ async fn historical_backfill_still_revokes_new_protocol_rows_for_active_bans() {
     .await
     .unwrap();
 
-    assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT backfill_invite_revocations()")
-            .fetch_one(&pool)
-            .await
-            .unwrap(),
-        1,
+    super::upgrade_postgres_tests::run_invite_repair_script(&pool).await;
+    let revoked: bool = sqlx::query_scalar(
+        "SELECT revoked_at IS NOT NULL FROM relay_invites WHERE community_id=$1 AND id=$2",
+    )
+    .bind(community.as_uuid())
+    .bind(invite.invite_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(
+        revoked,
         "active restriction repair applies to new-protocol rows"
     );
     assert_eq!(
-        claim_relay_invite(
+        claim_relay_invite_outcome(
             &pool,
             community,
             &hash_v2_code(&invite.code),
@@ -383,7 +418,7 @@ async fn malformed_legacy_issuers_return_a_typed_revoked_claim() {
         .await
         .unwrap();
         assert_eq!(
-            claim_relay_invite(&pool, community, &token_hash, &claimant, None)
+            claim_relay_invite_outcome(&pool, community, &token_hash, &claimant, None)
                 .await
                 .unwrap(),
             ClaimOutcome::Revoked,
@@ -403,7 +438,7 @@ async fn malformed_legacy_issuers_return_a_typed_revoked_claim() {
     .await
     .unwrap();
     assert_eq!(
-        claim_relay_invite(&pool, community, &token_hash, &claimant, None)
+        claim_relay_invite_outcome(&pool, community, &token_hash, &claimant, None)
             .await
             .unwrap(),
         ClaimOutcome::Invalid,
@@ -469,7 +504,7 @@ async fn queued_claim(
     let (claim_pool, name) = named_pool().await;
     let hash = hash_v2_code(code);
     let claim = tokio::spawn(async move {
-        claim_relay_invite(&claim_pool, community, &hash, &claimant, None).await
+        claim_relay_invite_outcome(&claim_pool, community, &hash, &claimant, None).await
     });
     wait_for_lock(pool, &name, "advisory", &claim).await;
     claim
@@ -578,7 +613,7 @@ async fn admission_first_then_ban_preserves_the_committed_use_and_denies_retries
         .await
         .unwrap();
     assert!(matches!(
-        claim_relay_invite(
+        claim_relay_invite_outcome(
             &pool,
             community,
             &hash_v2_code(&invite.code),
@@ -593,7 +628,7 @@ async fn admission_first_then_ban_preserves_the_committed_use_and_denies_retries
         .await
         .unwrap();
     assert_eq!(
-        claim_relay_invite(
+        claim_relay_invite_outcome(
             &pool,
             community,
             &hash_v2_code(&invite.code),

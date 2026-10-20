@@ -1,4 +1,6 @@
-use super::revocation_postgres_tests::{fixture, named_pool, wait_for_lock};
+use super::revocation_postgres_tests::{
+    claim_relay_invite_outcome, fixture, named_pool, wait_for_lock,
+};
 use super::*;
 
 #[tokio::test]
@@ -139,7 +141,7 @@ async fn linking_banned_owner_revokes_agent_invites_but_timeout_does_not() {
                 .await
                 .unwrap();
             assert_eq!(
-                claim_relay_invite(
+                claim_relay_invite_outcome(
                     &pool,
                     community,
                     &hash_v2_code(&invite.code),
@@ -152,7 +154,7 @@ async fn linking_banned_owner_revokes_agent_invites_but_timeout_does_not() {
             );
         } else {
             assert_eq!(
-                claim_relay_invite(
+                claim_relay_invite_outcome(
                     &pool,
                     community,
                     &hash_v2_code(&invite.code),
@@ -167,7 +169,7 @@ async fn linking_banned_owner_revokes_agent_invites_but_timeout_does_not() {
                 .await
                 .unwrap();
             assert!(matches!(
-                claim_relay_invite(
+                claim_relay_invite_outcome(
                     &pool,
                     community,
                     &hash_v2_code(&invite.code),
