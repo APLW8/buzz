@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 import '../../shared/deeplink/deep_link.dart';
+import '../../shared/agents/agents_surface.dart';
 import '../../shared/deeplink/pending_deep_link_provider.dart';
 import '../invites/invite_join_provider.dart';
 import '../invites/invite_join_sheet.dart';
@@ -56,6 +57,16 @@ class _DeepLinkDispatcherState extends ConsumerState<DeepLinkDispatcher> {
   }
 
   @override
+  void didUpdateWidget(covariant DeepLinkDispatcher oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!oldWidget.dispatchMessageLinks && widget.dispatchMessageLinks) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _maybeDispatch(ref.read(pendingDeepLinkProvider));
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     // Re-evaluate dispatch when either a new link arrives or channels load.
     ref.listen<BuzzDeepLink?>(pendingDeepLinkProvider, (_, link) {
@@ -72,6 +83,11 @@ class _DeepLinkDispatcherState extends ConsumerState<DeepLinkDispatcher> {
 
   void _maybeDispatch(BuzzDeepLink? link) {
     if (link == null || _preparingInvite || _handlingOnboarding) return;
+    if (link is AgentCreationDeepLink) {
+      if (!widget.dispatchMessageLinks) return;
+      unawaited(_dispatchAgentCreation(link));
+      return;
+    }
     if (widget.onboardingHandler != null &&
         (link is InviteDeepLink ||
             link is NostrBindDeepLink ||
@@ -93,6 +109,40 @@ class _DeepLinkDispatcherState extends ConsumerState<DeepLinkDispatcher> {
     }
 
     _dispatchNavigableLink(link);
+  }
+
+  Future<void> _dispatchAgentCreation(AgentCreationDeepLink link) async {
+    _handlingOnboarding = true;
+    try {
+      final handler = ref.read(agentCreationSurfaceProvider);
+      if (handler == null) {
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          const SnackBar(
+            content: Text('Agent creation is unavailable in this build.'),
+          ),
+        );
+      } else {
+        await handler(context, link);
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Could not open this agent draft. Reopen the link to retry.',
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        if (ref.read(pendingDeepLinkProvider) == link) {
+          ref.read(pendingDeepLinkProvider.notifier).consume();
+        }
+        _handlingOnboarding = false;
+        _maybeDispatch(ref.read(pendingDeepLinkProvider));
+      }
+    }
   }
 
   Future<void> _dispatchOnboarding(BuzzDeepLink link) async {

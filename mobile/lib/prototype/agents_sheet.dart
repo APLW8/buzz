@@ -80,6 +80,7 @@ class _AgentsNavigation extends HookConsumerWidget {
                             trailing: const SizedBox.shrink(),
                             child: UserProfileSheet(
                               pubkey: pubkey,
+                              fallbackAvatarUrl: controller.avatarUrls[pubkey],
                               primaryActionsSpacing: Grid.md,
                               contextualActionsSpacing: Grid.xxs,
                               contextualActions: (_) => DeleteAgentAction(
@@ -139,14 +140,15 @@ class PrototypeAgentsSheet extends HookConsumerWidget {
     useListenable(controller);
     final community = ref.watch(activeCommunityProvider).asData?.value;
     final directory = ref.watch(agentDirectoryProvider);
-    final registryFuture = useMemoized(
-      () => registeredCommunityAgents(
+    final registryFuture = useMemoized(() async {
+      final fetch = ref.read(relaySessionProvider.notifier).fetchHistory;
+      await controller.restoreDefinitionAvatars(fetch);
+      return registeredCommunityAgents(
         controller.agents,
         controller.owner,
-        ref.read(relaySessionProvider.notifier).fetchHistory,
-      ),
-      [community?.relayUrl, controller.agents, controller.owner],
-    );
+        fetch,
+      );
+    }, [community?.relayUrl, controller.agents, controller.owner]);
     final registered = useFuture(registryFuture, preserveState: false);
     final keys = {
       ...?registered.data,
@@ -254,7 +256,9 @@ class PrototypeAgentsSheet extends HookConsumerWidget {
                       vertical: Grid.xxs,
                     ),
                     leading: AvatarImage(
-                      imageUrl: profiles[key]?.avatarUrl,
+                      imageUrl:
+                          controller.avatarUrls[key] ??
+                          profiles[key]?.avatarUrl,
                       radius: Grid.sm,
                       isAgent: true,
                       backgroundColor: context.colors.surfaceContainerHighest,

@@ -49,7 +49,11 @@ class _Controller extends RemoteAgentController {
   }
 
   @override
-  Future<bool> create(String name, {String instructions = ''}) async {
+  Future<bool> create(
+    String name, {
+    String instructions = '',
+    Object? avatar,
+  }) async {
     submittedName = name;
     submittedInstructions = instructions;
     if (creationGate case final gate?) {

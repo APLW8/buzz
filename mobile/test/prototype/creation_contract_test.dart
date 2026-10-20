@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'package:buzz/shared/relay/relay.dart';
+import 'package:buzz/shared/emoji/emoji_avatar.dart';
 import 'package:buzz/prototype/remote_agent_controller.dart';
 import 'package:buzz/shared/deeplink/deep_link.dart';
 import 'package:buzz/shared/hosted/account_identity_store.dart';
@@ -51,6 +54,16 @@ class _Controller extends RemoteAgentController {
         keys: keys,
         relayAuth: HostedRelayAuth(account),
       );
+  Object? publishedAvatar;
+  @override
+  Future<void> publishAvatarDefinition(
+    AddCommunityDeepLink selected,
+    Map<String, dynamic> setup,
+  ) async {
+    publishedAvatar = setup['avatar'];
+    (account as _Registry).calls.add('publish-avatar');
+  }
+
   @override
   Future<void> refresh() async {}
   @override
@@ -64,6 +77,54 @@ class _Controller extends RemoteAgentController {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test(
+    'a fresh controller restores definition avatar through owner instance linkage',
+    () async {
+      final key = nostr.Keys('0' * 63 + '1');
+      final pubkey = nostr.Keys('0' * 63 + '2').public;
+      final account = _Registry(key.public);
+      final controller = _Controller(account, AccountIdentityStore())
+        ..owner = key.public
+        ..agents = [
+          {'agent_pubkey': pubkey},
+        ];
+      addTearDown(() {
+        controller.dispose();
+        controller.relayAuth.dispose();
+        account.dispose();
+      });
+      final url = emojiAvatarDataUrl('🦉', 0xff476cff);
+      final requests = <int>[];
+      await controller.restoreDefinitionAvatars((filter) async {
+        requests.add(filter.kinds.single);
+        expect(filter.authors, [key.public]);
+        final instance = filter.kinds.single == 30177;
+        expect(filter.tags['#d'], instance ? [pubkey] : ['qr-demo']);
+        return [
+          NostrEvent(
+            id: instance ? 'instance' : 'definition',
+            pubkey: key.public,
+            createdAt: 1,
+            kind: filter.kinds.single,
+            tags: [
+              ['d', instance ? pubkey : 'qr-demo'],
+            ],
+            content: jsonEncode(
+              instance ? {'persona_id': 'qr-demo'} : {'avatar_url': url},
+            ),
+            sig: '',
+          ),
+        ];
+      });
+      expect(requests, [30177, 30175]);
+      expect(controller.avatarUrls, {pubkey: url});
+      expect(
+        parseEmojiAvatarDataUrl(controller.avatarUrls[pubkey])?.emoji,
+        '🦉',
+      );
+    },
+  );
+
   test(
     'instructions follow activation; failed update resumes same identity before subscription',
     () async {
@@ -90,7 +151,11 @@ void main() {
       expect(account.calls, isEmpty);
       expect(controller.pending, isNull);
       expect(
-        await controller.create('Scout', instructions: 'Reply concisely.'),
+        await controller.create(
+          'Scout',
+          instructions: 'Reply concisely.',
+          avatar: const {'emoji': '🦉', 'color': '#476CFF'},
+        ),
         isFalse,
       );
       expect(account.calls, ['register-agent', 'attest-agent', 'update-agent']);
@@ -116,12 +181,17 @@ void main() {
         'attest-agent',
         'update-agent',
         'add-buzz-subscription',
+        'publish-avatar',
         'publish-policy',
       ]);
       expect(
         account.bodies['/v3/beekeeper/update-agent']?['agent_instructions'],
         'Reply concisely.',
       );
+      expect(controller.publishedAvatar, {'emoji': '🦉', 'color': '#476CFF'});
+      final persistedAvatars = prefs.getString('null:avatars');
+      expect(persistedAvatars, contains('data:image/svg+xml'));
+      expect(persistedAvatars, isNot(contains('Reply concisely.')));
       expect(controller.pending, isNull);
     },
     skip: HostedEnvironment.origin.host != 'app.builderlabstaging.xyz'

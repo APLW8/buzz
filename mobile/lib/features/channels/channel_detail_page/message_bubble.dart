@@ -483,7 +483,7 @@ class _MessageBubble extends HookConsumerWidget {
   }
 }
 
-class _UserAvatar extends StatelessWidget {
+class _UserAvatar extends ConsumerWidget {
   final UserProfile? profile;
   final String pubkey;
   final bool isAgent;
@@ -495,11 +495,12 @@ class _UserAvatar extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     const size = messageAvatarSize;
     final initial =
         profile?.initial ?? (pubkey.isNotEmpty ? pubkey[0].toUpperCase() : '?');
-    final avatarUrl = profile?.avatarUrl;
+    final avatarUrl =
+        ref.watch(agentDefinitionAvatarsProvider)[pubkey] ?? profile?.avatarUrl;
 
     return AvatarImage(
       imageUrl: avatarUrl,

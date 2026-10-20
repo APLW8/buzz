@@ -7,6 +7,7 @@ import '../shared/community/community_provider.dart';
 import '../shared/deeplink/deep_link.dart';
 import '../shared/theme/theme.dart';
 import '../shared/widgets/buzz_titled_sheet_layout.dart';
+import '../shared/widgets/avatar_image.dart';
 import 'remote_agent_controller.dart';
 
 /// Uses the registry's name and private-instructions contract. Runtime/model
@@ -16,26 +17,39 @@ class CreatePrototypeAgentSheet extends HookConsumerWidget {
     required this.controller,
     required this.community,
     required this.onCreated,
+    this.draft,
     super.key,
   });
   final RemoteAgentController controller;
   final Community community;
   final VoidCallback onCreated;
+  final AgentCreationDeepLink? draft;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     useListenable(controller);
     final name = useTextEditingController(
-      text: controller.pending?['name'] as String? ?? '',
+      text: controller.pending?['name'] as String? ?? draft?.name ?? '',
     );
     final instructions = useTextEditingController(
-      text: controller.pending?['instructions'] as String? ?? '',
+      text:
+          controller.pending?['instructions'] as String? ??
+          draft?.instructions ??
+          '',
     );
     useListenable(name);
     final error = useState<String?>(null);
     final active = ref.watch(activeCommunityProvider).asData?.value;
     final sameCommunity = active?.id == community.id;
     final pending = controller.pending != null;
+    final avatar = controller.pending?['avatar'] ?? draft?.avatar;
+    final avatarUrl = avatar == null
+        ? null
+        : AgentCreationDeepLink(
+            name: name.text,
+            instructions: '',
+            avatar: avatar,
+          ).avatarUrl;
     final canCreate =
         !controller.busy && sameCommunity && name.text.trim().isNotEmpty;
     final actionStyle = IconButton.styleFrom(
@@ -105,6 +119,7 @@ class CreatePrototypeAgentSheet extends HookConsumerWidget {
       final success = await controller.create(
         name.text,
         instructions: instructions.text,
+        avatar: avatar,
       );
       if (!context.mounted) return;
       if (success) {
@@ -122,7 +137,9 @@ class CreatePrototypeAgentSheet extends HookConsumerWidget {
           bottom: MediaQuery.viewInsetsOf(context).bottom,
         ),
         child: BuzzTitledSheetLayout(
-          title: 'Create agent',
+          title: avatar == null
+              ? 'Create agent'
+              : 'Create in ${community.name}',
           leading: IconButton(
             tooltip: 'Cancel',
             style: actionStyle,
@@ -151,6 +168,17 @@ class CreatePrototypeAgentSheet extends HookConsumerWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (avatarUrl != null) ...[
+                  Center(
+                    child: AvatarImage(
+                      imageUrl: avatarUrl,
+                      radius: Grid.md,
+                      isAgent: true,
+                      fallback: const Icon(Icons.smart_toy_outlined),
+                    ),
+                  ),
+                  const SizedBox(height: Grid.sm),
+                ],
                 TextField(
                   controller: name,
                   autofocus: true,

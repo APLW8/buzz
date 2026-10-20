@@ -194,7 +194,9 @@ class _DmAvatar extends ConsumerWidget {
       ref.read(presenceCacheProvider.notifier).track([otherPubkey]);
     }
 
-    final avatarUrl = profile?.avatarUrl;
+    final avatarUrl =
+        ref.watch(agentDefinitionAvatarsProvider)[otherPubkey] ??
+        profile?.avatarUrl;
     // Keyed to the hex public key when the counterpart is unnamed and the
     // profile isn't cached — the compact-npub participant label would
     // otherwise render `N` for every unnamed DM counterpart. Selection skips

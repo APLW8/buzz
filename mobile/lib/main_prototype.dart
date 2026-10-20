@@ -15,23 +15,33 @@ import 'shared/hosted/browser_auth.dart';
 import 'shared/hosted/hosted_relay_auth.dart';
 import 'shared/agents/agents_surface.dart';
 import 'prototype/agents_sheet.dart';
+import 'prototype/agent_link_surface.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // A one-time, in-memory simulator launch environment transfers the owner's
   // existing identity into device-only Keychain. Never compiled into the app.
-  final nsec = kDebugMode
-      ? await const MethodChannel(
-          'buzz/prototype_identity',
-        ).invokeMethod<String>('take')
-      : null;
-  if (kDebugMode && nsec != null) await AccountIdentityStore().create(nsec);
-  await runBuzzApp(const RemotePrototype());
+  var simulator = false;
+  if (kDebugMode) {
+    try {
+      final nsec = await const MethodChannel(
+        'buzz/prototype_identity',
+      ).invokeMethod<String>('take');
+      simulator = true;
+      if (nsec != null) await AccountIdentityStore().create(nsec);
+    } on MissingPluginException {
+      // This channel is intentionally registered only by the simulator build.
+    }
+  }
+  await runBuzzApp(RemotePrototype(useSimulatorBrowser: simulator));
 }
 
 /// Separate entry point keeps the throwaway workflow out of normal app builds.
 class RemotePrototype extends HookConsumerWidget {
-  const RemotePrototype({super.key});
+  const RemotePrototype({super.key, this.useSimulatorBrowser = false});
+
+  /// Uses the Mac Chrome loopback bridge only after simulator detection.
+  final bool useSimulatorBrowser;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -40,7 +50,7 @@ class RemotePrototype extends HookConsumerWidget {
         account: ref.read(builderlabAccountProvider),
         relayAuth: ref.read(hostedRelayAuthProvider),
         browser: BrowserAuth(
-          openBrowser: kDebugMode ? openSimulatorChrome : null,
+          openBrowser: useSimulatorBrowser ? openSimulatorChrome : null,
         ),
         keys: AccountIdentityStore(),
       ),
@@ -54,6 +64,12 @@ class RemotePrototype extends HookConsumerWidget {
       overrides: [
         agentsSurfaceProvider.overrideWithValue(
           (context) => showPrototypeAgents(context, controller),
+        ),
+        agentCreationSurfaceProvider.overrideWithValue(
+          (context, draft) => showAgentLinkCreate(context, controller, draft),
+        ),
+        agentDefinitionAvatarsProvider.overrideWithValue(
+          controller.account.account == null ? const {} : controller.avatarUrls,
         ),
         availableRemoteAgentsProvider.overrideWithValue({
           for (final agent in controller.agents)

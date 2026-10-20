@@ -8,6 +8,7 @@ import 'package:hooks_riverpod/misc.dart' show ProviderListenable;
 import 'package:buzz/shared/theme/buzz_icons.dart';
 
 import '../../shared/animated_avatar.dart';
+import '../../shared/agents/agents_surface.dart';
 import '../../shared/identity_names/identity_names.dart';
 import '../../shared/identity_names/identity_names_provider.dart';
 import '../../shared/relay/relay.dart';
@@ -58,6 +59,9 @@ void showUserProfileSheet(
 class UserProfileSheet extends HookConsumerWidget {
   final String pubkey;
 
+  /// Owner-definition artwork supplied by the opening agent surface.
+  final String? fallbackAvatarUrl;
+
   /// The opening surface's comparison context. The sheet watches it, so its
   /// title follows profile and context changes while it is open. The caller
   /// owns the context, so this sheet depends on no other feature's state.
@@ -75,6 +79,7 @@ class UserProfileSheet extends HookConsumerWidget {
   const UserProfileSheet({
     super.key,
     required this.pubkey,
+    this.fallbackAvatarUrl,
     this.names,
     this.contextualActions,
     this.primaryActionsSpacing = Grid.xs + Grid.half,
@@ -130,7 +135,10 @@ class UserProfileSheet extends HookConsumerWidget {
     final displayName =
         (opener != null ? ref.watch(opener) : watchIdentityNames(ref, {pk}))
             .labelFor(pk);
-    final avatarUrl = profile?.avatarUrl;
+    final avatarUrl =
+        ref.watch(agentDefinitionAvatarsProvider)[pk] ??
+        fallbackAvatarUrl ??
+        profile?.avatarUrl;
     final nip05 = profile?.nip05Handle;
     final initial =
         profile?.initial ?? (pubkey.isNotEmpty ? pubkey[0].toUpperCase() : '?');

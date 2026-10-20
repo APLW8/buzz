@@ -20,6 +20,7 @@ import '../shared/hosted/hosted_community_creation.dart';
 import '../shared/hosted/hosted_relay_auth.dart';
 import '../shared/relay/relay_provider.dart';
 import '../shared/relay/nostr_models.dart';
+import '../shared/emoji/emoji_avatar.dart';
 import '../shared/storage/secure_storage.dart';
 import '../shared/relay/signed_event_relay.dart';
 
@@ -51,6 +52,7 @@ class RemoteAgentController extends ChangeNotifier {
   Map<String, dynamic>? pending;
   String? _scope;
   Set<String> deletedAgents = {};
+  Map<String, String> avatarUrls = {};
 
   String get _deletionScope {
     final subject = account.account?.subject;
@@ -164,7 +166,11 @@ class RemoteAgentController extends ChangeNotifier {
         );
       });
 
-  Future<void> initialize() async {
+  Future<void>? _initialization;
+
+  Future<void> initialize() => _initialization ??= _initialize();
+
+  Future<void> _initialize() async {
     if (HostedEnvironment.origin.host != 'app.builderlabstaging.xyz') {
       throw StateError(
         'This prototype requires the staging build configuration.',
@@ -242,6 +248,9 @@ class RemoteAgentController extends ChangeNotifier {
         'remote-prototype:${HostedEnvironment.origin.host}:${session.subject}';
     final prefs = await SharedPreferences.getInstance();
     deletedAgents = prefs.getStringList('$_scope:deleted')?.toSet() ?? {};
+    avatarUrls = Map<String, String>.from(
+      jsonDecode(prefs.getString('$_scope:avatars') ?? '{}') as Map,
+    );
     final raw = prefs.getString('$_scope:pending');
     pending = raw == null
         ? null
@@ -367,7 +376,11 @@ class RemoteAgentController extends ChangeNotifier {
     pending = value;
   }
 
-  Future<bool> create(String name, {String instructions = ''}) => run(() async {
+  Future<bool> create(
+    String name, {
+    String instructions = '',
+    Object? avatar,
+  }) => run(() async {
     final selected = community;
     if (selected == null) {
       throw StateError('Choose an existing staging community.');
@@ -389,6 +402,7 @@ class RemoteAgentController extends ChangeNotifier {
       await _savePending({
         'name': trimmed,
         'instructions': instructions.trim(),
+        'avatar': ?avatar,
         'community': selected.relayUrl,
         'owner': owner,
         'request': const Uuid().v4(),
@@ -434,7 +448,20 @@ class RemoteAgentController extends ChangeNotifier {
       });
     }
     await subscribe(setup['id'] as String);
+    if (setup['avatar'] != null) await publishAvatarDefinition(selected, setup);
     await publishPolicy(selected, setup);
+    if (setup['avatar'] case final Object avatar) {
+      final draft = AgentCreationDeepLink(
+        name: setup['name'] as String,
+        instructions: '',
+        avatar: avatar,
+      );
+      final prefs = await SharedPreferences.getInstance();
+      avatarUrls = {...avatarUrls, pubkey: draft.avatarUrl};
+      if (!await prefs.setString('$_scope:avatars', jsonEncode(avatarUrls))) {
+        throw StateError('Could not save the agent avatar. Retry setup.');
+      }
+    }
     // Retain the completed registration if the listing refresh fails, so Retry
     // resumes the same identity instead of creating another agent.
     await refresh();
@@ -447,6 +474,98 @@ class RemoteAgentController extends ChangeNotifier {
     status =
         '${setup['name']} is active. Open Buzz and mention it in a channel.';
   });
+
+  /// Restores artwork from the current owner's linked relay definitions.
+  Future<void> restoreDefinitionAvatars(
+    Future<List<NostrEvent>> Function(NostrFilter) fetch,
+  ) async {
+    final currentOwner = owner;
+    if (currentOwner == null || agents.isEmpty) return;
+    final subject = account.account?.subject;
+    final instances = await fetch(
+      NostrFilter(
+        kinds: const [30177],
+        authors: [currentOwner],
+        tags: {
+          '#d': agents.map((agent) => agent['agent_pubkey'] as String).toList(),
+        },
+      ),
+    );
+    final links = <String, String>{};
+    for (final event in instances) {
+      final content = jsonDecode(event.content);
+      final key = event.tags
+          .where((tag) => tag.length > 1 && tag.first == 'd')
+          .firstOrNull?[1];
+      if (content is Map && content['persona_id'] is String && key != null) {
+        links[key] = content['persona_id'] as String;
+      }
+    }
+    if (links.isEmpty) return;
+    final definitions = await fetch(
+      NostrFilter(
+        kinds: const [30175],
+        authors: [currentOwner],
+        tags: {'#d': links.values.toSet().toList()},
+      ),
+    );
+    if (owner != currentOwner || account.account?.subject != subject) return;
+    final restored = <String, String>{};
+    for (final event in definitions) {
+      final content = jsonDecode(event.content);
+      final slug = event.tags
+          .where((tag) => tag.length > 1 && tag.first == 'd')
+          .firstOrNull?[1];
+      final url = content is Map ? content['avatar_url'] : null;
+      if (url is! String) continue;
+      final uri = Uri.tryParse(url);
+      if (parseEmojiAvatarDataUrl(url) == null &&
+          (uri == null ||
+              uri.scheme != 'https' ||
+              uri.host.isEmpty ||
+              uri.userInfo.isNotEmpty)) {
+        continue;
+      }
+      for (final entry in links.entries) {
+        if (entry.value == slug) restored[entry.key] = url;
+      }
+    }
+    final updated = {...avatarUrls, ...restored};
+    if (!mapEquals(avatarUrls, updated)) {
+      avatarUrls = updated;
+      notifyListeners();
+    }
+  }
+
+  /// Stores public artwork in the canonical owner-authored NIP-AP definition.
+  /// Private runtime instructions never enter this relay event.
+  Future<void> publishAvatarDefinition(
+    AddCommunityDeepLink selected,
+    Map<String, dynamic> setup,
+  ) async {
+    final draft = AgentCreationDeepLink(
+      name: setup['name'] as String,
+      instructions: '',
+      avatar: setup['avatar']!,
+    );
+    await keys.withKeys((key) async {
+      await submitSignedEventOnce(
+        wsUrl: selected.relayUrl,
+        headers: await relayAuth.headers(
+          RelayConfig(baseUrl: selected.relayUrl, nsec: key.nsec),
+        ),
+        nsec: key.nsec,
+        kind: 30175,
+        tags: [
+          ['d', 'qr-${setup['request']}'],
+        ],
+        content: jsonEncode({
+          'display_name': setup['name'],
+          'avatar_url': draft.avatarUrl,
+        }),
+      );
+    });
+  }
 
   /// Publish the owner policy only after activation and subscription succeed.
   Future<void> publishPolicy(
@@ -469,6 +588,7 @@ class RemoteAgentController extends ChangeNotifier {
         kind: 30177,
         content: jsonEncode({
           'name': setup['name'],
+          if (setup['avatar'] != null) 'persona_id': 'qr-${setup['request']}',
           'parallelism': 1,
           'respond_to': 'owner-only',
         }),

@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:hooks_riverpod/hooks_riverpod.dart';
+import '../../shared/agents/agents_surface.dart';
 
 import '../../shared/theme/theme.dart';
 import '../../shared/widgets/avatar_image.dart';
 import '../../shared/profile/user_profile.dart';
 
 /// 20px avatar used in thread summary rows and other compact lists.
-class SmallAvatar extends StatelessWidget {
+class SmallAvatar extends ConsumerWidget {
   final String pubkey;
   final Map<String, UserProfile> userCache;
   final double size;
@@ -18,9 +20,10 @@ class SmallAvatar extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final profile = userCache[pubkey.toLowerCase()];
-    final avatarUrl = profile?.avatarUrl;
+    final avatarUrl =
+        ref.watch(agentDefinitionAvatarsProvider)[pubkey] ?? profile?.avatarUrl;
     final initial =
         profile?.initial ?? (pubkey.isNotEmpty ? pubkey[0].toUpperCase() : '?');
     final isAgent = profile?.ownerPubkey != null;
