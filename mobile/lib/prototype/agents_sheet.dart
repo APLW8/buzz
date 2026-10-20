@@ -164,11 +164,13 @@ class PrototypeAgentsSheet extends HookConsumerWidget {
     );
     keys.sort((a, b) => names.labelFor(a).compareTo(names.labelFor(b)));
     final profiles = ref.watch(userCacheProvider);
+    final creating = useState(false);
     final failed = directory.hasError || registered.hasError;
     final loading =
-        controller.busy ||
-        directory.isLoading ||
-        registered.connectionState != ConnectionState.done;
+        !creating.value &&
+        (controller.busy ||
+            directory.isLoading ||
+            registered.connectionState != ConnectionState.done);
 
     Future<void> refresh() async {
       await controller.run(controller.refresh);
@@ -186,18 +188,26 @@ class PrototypeAgentsSheet extends HookConsumerWidget {
         ),
         trailing: IconButton(
           tooltip: 'Add agent',
-          onPressed: community == null || controller.busy
+          onPressed: community == null || controller.busy || creating.value
               ? null
-              : () => showBuzzModalBottomSheet<bool>(
-                  context: context,
-                  isScrollControlled: true,
-                  showCloseButton: false,
-                  builder: (_) => CreatePrototypeAgentSheet(
-                    controller: controller,
-                    community: community,
-                    onCreated: () => ref.invalidate(agentDirectoryProvider),
-                  ),
-                ),
+              : () async {
+                  creating.value = true;
+                  try {
+                    await showBuzzModalBottomSheet<bool>(
+                      context: context,
+                      useRootNavigator: true,
+                      isScrollControlled: true,
+                      showCloseButton: false,
+                      builder: (_) => CreatePrototypeAgentSheet(
+                        controller: controller,
+                        community: community,
+                        onCreated: () => ref.invalidate(agentDirectoryProvider),
+                      ),
+                    );
+                  } finally {
+                    if (context.mounted) creating.value = false;
+                  }
+                },
           icon: const Icon(Icons.add),
         ),
         child: Material(
@@ -212,7 +222,9 @@ class PrototypeAgentsSheet extends HookConsumerWidget {
                 if (controller.account.account == null)
                   ListTile(
                     title: const Text('Sign in to create an agent'),
-                    subtitle: controller.busy ? Text(controller.status) : null,
+                    subtitle: controller.busy && !creating.value
+                        ? Text(controller.status)
+                        : null,
                     trailing: TextButton(
                       onPressed: controller.busy ? null : controller.signIn,
                       child: const Text('Sign in'),
