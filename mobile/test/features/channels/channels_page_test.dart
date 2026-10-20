@@ -10,6 +10,7 @@ import 'package:buzz/features/pairing/pairing_provider.dart';
 import 'package:buzz/shared/community/paired_community_landing.dart';
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -253,7 +254,32 @@ void main() {
   testWidgets(
     'section view stages choices until Apply and reopens saved duration',
     (tester) async {
-      final manager = _filterTestManager()..ready = true;
+      var publications = 0;
+      final keys = nostr.Keys.generate();
+      final crypto = ChannelSortCrypto(keys.nsec, keys.public);
+      final remote = NostrEvent.fromJson(
+        nostr.Event.from(
+          kind: EventKind.readState,
+          tags: [
+            ['d', 'channel-filter'],
+          ],
+          content: crypto.encrypt(
+            jsonEncode(
+              ChannelFilterStore.empty()
+                  .edit('channels', ChannelFilterMode.unreads)
+                  .toJson(),
+            ),
+          ),
+          secretKey: nostr.Nip19.decode(payload: keys.nsec).data,
+          createdAt: 10,
+          verify: false,
+        ).toMap(),
+      );
+      final manager = _filterTestManager(
+        fetch: () async => [remote],
+        testKeys: keys,
+        onPublish: () => publications++,
+      );
       await tester.pumpWidget(
         buildTestable(
           overrides: [
@@ -265,12 +291,32 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Channels options'));
       await tester.pumpAndSettle();
+      // Sort is available while preferences load. A late verified load must
+      // update the untouched filter draft and never cause an All publication.
+      await tester.tap(find.text('Recent'));
+      await tester.pumpAndSettle();
+      await manager.refresh();
+      await tester.pumpAndSettle();
+      expect(manager.store.modeFor('channels'), ChannelFilterMode.unreads);
+      final unreads = tester.widget<AppListRow>(
+        find.ancestor(
+          of: find.text('Unreads'),
+          matching: find.byType(AppListRow),
+        ),
+      );
+      expect(unreads.trailing, isA<Icon>());
+      await tester.tap(find.text('Apply'));
+      await tester.pumpAndSettle();
+      expect(publications, 0);
+      expect(manager.store.modeFor('channels'), ChannelFilterMode.unreads);
+      await tester.tap(find.byTooltip('Channels options'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Active'));
       await tester.pumpAndSettle();
       await tester.ensureVisible(find.text('7 days'));
       await tester.tap(find.text('7 days'));
       await tester.pumpAndSettle();
-      expect(manager.store.modeFor('channels'), ChannelFilterMode.all);
+      expect(manager.store.modeFor('channels'), ChannelFilterMode.unreads);
       await tester.tap(find.text('Apply'));
       await tester.pumpAndSettle();
       expect(manager.store.modeFor('channels'), ChannelFilterMode.active);
@@ -4414,11 +4460,13 @@ class _CompletedPairingNotifier extends PairingNotifier {
 }
 
 ChannelFilterManager _filterTestManager({
+  Future<List<NostrEvent>> Function()? fetch,
+  nostr.Keys? testKeys,
   ChannelFilterStore? cached,
   bool failPublish = false,
   VoidCallback? onPublish,
 }) {
-  final keys = nostr.Keys.generate();
+  final keys = testKeys ?? nostr.Keys.generate();
   final crypto = ChannelSortCrypto(keys.nsec, keys.public);
   var history = <NostrEvent>[];
   return ChannelFilterManager(
@@ -4426,7 +4474,8 @@ ChannelFilterManager _filterTestManager({
     crypto: crypto,
     cached: cached,
     cache: (_) {},
-    fetch: () async => history,
+    fetch: () async =>
+        history.isEmpty && fetch != null ? await fetch() : history,
     publish: (content, at) async {
       onPublish?.call();
       if (failPublish) throw StateError('rejected');

@@ -58,12 +58,12 @@ class _SectionViewSheet extends HookConsumerWidget {
     final days = useState(
       (manager?.store.windowFor(group) ?? defaultActiveWindowSeconds) ~/ 86400,
     );
-    final dirty = useState(false);
+    final filterDirty = useState(false);
     final saving = useState(false);
     final failed = useState(false);
     // A confirmed initial load may arrive while the sheet is open. Preserve edits.
     useEffect(() {
-      if (!dirty.value && !saving.value) {
+      if (!filterDirty.value && !saving.value) {
         mode.value = manager?.store.modeFor(group) ?? ChannelFilterMode.all;
         days.value =
             (manager?.store.windowFor(group) ?? defaultActiveWindowSeconds) ~/
@@ -105,7 +105,7 @@ class _SectionViewSheet extends HookConsumerWidget {
                 (manager?.store.modeFor(group) ?? ChannelFilterMode.all) ||
             (mode.value == ChannelFilterMode.active &&
                 days.value * 86400 != manager?.store.windowFor(group));
-        if (filterChanged) {
+        if (filterDirty.value && filterChanged) {
           if (manager == null || !manager.ready || manager.busy) {
             throw StateError('Preferences are read-only');
           }
@@ -157,7 +157,6 @@ class _SectionViewSheet extends HookConsumerWidget {
               onTap: change == null
                   ? null
                   : () {
-                      dirty.value = true;
                       change(entry.key);
                     },
             ),
@@ -208,7 +207,12 @@ class _SectionViewSheet extends HookConsumerWidget {
                             ChannelFilterMode.active: 'Active',
                           },
                           mode.value,
-                          writable ? (value) => mode.value = value : null,
+                          writable
+                              ? (value) {
+                                  filterDirty.value = true;
+                                  mode.value = value;
+                                }
+                              : null,
                         ),
                         if (mode.value == ChannelFilterMode.active)
                           choices<int>(
@@ -218,7 +222,12 @@ class _SectionViewSheet extends HookConsumerWidget {
                                 day: '$day ${day == 1 ? 'day' : 'days'}',
                             },
                             days.value,
-                            writable ? (value) => days.value = value : null,
+                            writable
+                                ? (value) {
+                                    filterDirty.value = true;
+                                    days.value = value;
+                                  }
+                                : null,
                           ),
                         if (manager?.ready != true)
                           const Text(
