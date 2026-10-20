@@ -69,7 +69,9 @@ class ChannelFilterStore {
             (r[2] == null || r[2] == 'unreads' || r[2] == 'active'),
         limit: 2048,
       );
-      copy['meta'] = {if (raw is Map) ...raw, 'v': 1, 'g': registers};
+      // The companion admits only v/g inside metadata; top-level extensions
+      // remain preserved above. Explicit saves publish this canonical repair.
+      copy['meta'] = {'v': 1, 'g': registers};
       // Metadata remains authoritative: dropping an invalid register must not
       // resurrect its stale legacy projection (including an All tombstone).
       copy['groups'] = {

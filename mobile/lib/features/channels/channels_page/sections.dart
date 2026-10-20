@@ -135,9 +135,7 @@ class _CustomSectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final sectionColor = context.colors.brightness == Brightness.dark
-        ? const Color(0xFF595959)
-        : const Color(0xFF959595);
+    final sectionColor = navigationMetadataForeground(context);
     return GestureDetector(
       onTap: onToggle,
       behavior: HitTestBehavior.opaque,
@@ -164,7 +162,7 @@ class _CustomSectionHeader extends StatelessWidget {
                 icon: Icon(
                   BuzzIcons.ellipsisVertical,
                   size: _kChannelIconSize,
-                  color: sectionColor,
+                  color: navigationSecondaryForeground(context),
                 ),
                 onPressed: () async {
                   final value = await _showSectionViewSheet(
@@ -405,9 +403,7 @@ class _SectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final sectionColor = context.colors.brightness == Brightness.dark
-        ? const Color(0xFF595959)
-        : const Color(0xFF959595);
+    final sectionColor = navigationMetadataForeground(context);
 
     return GestureDetector(
       onTap: onToggle,
@@ -436,7 +432,7 @@ class _SectionHeader extends StatelessWidget {
                   icon: Icon(
                     BuzzIcons.ellipsisVertical,
                     size: _kChannelIconSize,
-                    color: sectionColor,
+                    color: navigationSecondaryForeground(context),
                   ),
                   onPressed: () async {
                     await _showSectionViewSheet(
@@ -483,7 +479,10 @@ class _SectionLabel extends StatelessWidget {
         ),
       ),
       const SizedBox(width: Grid.quarter),
-      _SectionChevron(expanded: expanded, color: color),
+      _SectionChevron(
+        expanded: expanded,
+        color: navigationSecondaryForeground(context),
+      ),
     ],
   );
 }

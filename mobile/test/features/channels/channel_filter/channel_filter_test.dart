@@ -316,6 +316,7 @@ void main() {
         'future': {'keep': true},
         'meta': {
           'v': 1,
+          'unknownSibling': {'rejectOnDesktop': true},
           'g': {
             'channels': [12, '0000000000000000', 'active'],
             'forums': ['bad', '0000000000000000', 'unreads'],
@@ -348,6 +349,7 @@ void main() {
       expect(repaired['activeWindowSeconds'], {'channels': 604800});
       expect(repaired['groups'], {'channels': 'active', 'forums': 'unreads'});
       expect(repaired['future'], malformed['future']);
+      expect((repaired['meta'] as Map).keys, unorderedEquals(['v', 'g']));
       expect(subject.ready, isTrue);
       expect(cached.last.toJson(), repaired);
       subject.dispose();
