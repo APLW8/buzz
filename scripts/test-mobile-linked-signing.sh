@@ -11,7 +11,7 @@ xcodebuild -workspace mobile/ios/Runner.xcworkspace -scheme Runner \
   -configuration Debug -sdk iphonesimulator -destination "id=$device" \
   -derivedDataPath "${BUZZ_SIGNING_DERIVED_DATA:-$fixture/build}" -jobs 2 \
   BUNDLE_IDENTIFIER="$bundle" CODE_SIGNING_ALLOWED=NO ONLY_ACTIVE_ARCH=YES \
-  FLUTTER_TARGET=tool/native_signing_probe.dart build > "$fixture/build.log" 2>&1 || {
+  FLUTTER_TARGET="${BUZZ_SIGNING_PROBE_TARGET:-tool/native_signing_probe.dart}" build > "$fixture/build.log" 2>&1 || {
     cat "$fixture/build.log"
     exit 1
   }

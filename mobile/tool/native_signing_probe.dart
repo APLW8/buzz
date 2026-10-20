@@ -61,7 +61,7 @@ Future<void> runProbe() async {
   final watch = Stopwatch()..start();
   final proofs = <Map<String, String>>[];
   for (var i = 0; i < 64; i++) {
-    proofs.add(await media.headersForAsync('https://relay.example/media/$i'));
+    proofs.add(media.headersFor('https://relay.example/media/$i'));
   }
   results.add('64 complete media headers: ${watch.elapsedMicroseconds} us');
   for (final proof in proofs) {
@@ -69,9 +69,7 @@ Future<void> runProbe() async {
     final event = nostr.Event.fromJson(utf8.decode(base64Decode(encoded)));
     if (!event.isValid()) throw StateError('Invalid media proof');
   }
-  if ((await media.headersForAsync(
-    'https://foreign.example/media/x',
-  )).isNotEmpty) {
+  if ((media.headersFor('https://foreign.example/media/x')).isNotEmpty) {
     throw StateError('Foreign host received credentials');
   }
   results.add('media signatures and foreign-host isolation: PASS');

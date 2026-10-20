@@ -7,11 +7,13 @@ import 'package:nostr/nostr.dart' as nostr;
 /// Signs canonical Nostr events with libsecp256k1 on iOS.
 ///
 /// Native keypairs exist only for this call and are wiped before returning.
-/// Other platforms retain the existing Dart implementation.
+/// Other platforms retain the existing Dart implementation, including the
+/// optional cached [pubkey]. iOS derives its public key from the native keypair.
 nostr.Event signEvent({
   required int kind,
   required String content,
   required String secretKey,
+  String? pubkey,
   int? createdAt,
   List<List<String>> tags = const [],
   bool verify = false,
@@ -21,6 +23,7 @@ nostr.Event signEvent({
       kind: kind,
       content: content,
       secretKey: secretKey,
+      pubkey: pubkey,
       createdAt: createdAt,
       tags: tags,
       verify: verify,
