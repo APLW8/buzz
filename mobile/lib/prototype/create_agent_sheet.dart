@@ -167,8 +167,8 @@ class CreatePrototypeAgentSheet extends HookConsumerWidget {
                   textCapitalization: TextCapitalization.sentences,
                   textInputAction: TextInputAction.newline,
                   decoration: fieldDecoration(
-                    'Instructions (optional)',
-                    hint: 'Describe what this agent should do.',
+                    'Instructions',
+                    hint: 'Describe what this agent should do (optional).',
                   ),
                 ),
                 if (controller.busy) ...[

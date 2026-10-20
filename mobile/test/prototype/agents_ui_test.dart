@@ -155,12 +155,9 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.text('Agents list'));
         await tester.pumpAndSettle();
+        await tester.enterText(find.widgetWithText(TextField, 'Name'), 'Scout');
         await tester.enterText(
-          find.widgetWithText(TextField, 'Display name'),
-          'Scout',
-        );
-        await tester.enterText(
-          find.widgetWithText(TextField, 'Instructions (optional)'),
+          find.widgetWithText(TextField, 'Instructions'),
           'Reply concisely.',
         );
         await tester.pump();
