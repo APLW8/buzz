@@ -24,17 +24,17 @@ class _ChannelHeaderActions extends StatelessWidget {
         Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (onSearch != null)
-              IconButton(
-                tooltip: 'Search',
-                icon: const Icon(BuzzIcons.search300),
-                onPressed: onSearch,
-              ),
             if (onAgents != null)
               IconButton(
                 tooltip: 'Agents',
                 icon: const Icon(BuzzIcons.bot),
                 onPressed: onAgents,
+              ),
+            if (onSearch != null)
+              IconButton(
+                tooltip: 'Search',
+                icon: const Icon(BuzzIcons.search300),
+                onPressed: onSearch,
               ),
             if (onInbox != null)
               Semantics(

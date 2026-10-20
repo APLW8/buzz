@@ -482,14 +482,6 @@ class ChannelsPage extends HookConsumerWidget {
           onPressed: openCommunitySwitcher,
         ),
         nativeActions: [
-          if (onSearch != null)
-            IosNavigationAction(
-              label: 'Search',
-              symbol: 'magnifyingglass',
-              sharesBackground: true,
-              icon: BuzzIcons.search300,
-              onPressed: onSearch,
-            ),
           if (onAgents != null)
             IosNavigationAction(
               label: 'Agents',
@@ -497,6 +489,14 @@ class ChannelsPage extends HookConsumerWidget {
               sharesBackground: true,
               icon: BuzzIcons.bot,
               onPressed: onAgents,
+            ),
+          if (onSearch != null)
+            IosNavigationAction(
+              label: 'Search',
+              symbol: 'magnifyingglass',
+              sharesBackground: true,
+              icon: BuzzIcons.search300,
+              onPressed: onSearch,
             ),
           if (onInbox != null)
             IosNavigationAction(

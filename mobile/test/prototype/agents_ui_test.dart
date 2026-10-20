@@ -164,7 +164,7 @@ void main() {
           'Reply concisely.',
         );
         await tester.pump();
-        await tester.tap(find.text('Create'));
+        await tester.tap(find.byTooltip('Create'));
         await tester.pumpAndSettle();
         expect(controller.submittedName, 'Scout');
         expect(controller.submittedInstructions, 'Reply concisely.');

@@ -5,7 +5,6 @@ import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 import '../features/profile/user_profile_sheet.dart';
-import '../features/profile/presence_cache_provider.dart';
 import '../shared/community/community_provider.dart';
 import '../shared/crypto/nip_oa.dart';
 import '../shared/identity_names/identity_names_provider.dart';
@@ -88,7 +87,6 @@ class PrototypeAgentsSheet extends HookConsumerWidget {
     );
     keys.sort((a, b) => names.labelFor(a).compareTo(names.labelFor(b)));
     final profiles = ref.watch(userCacheProvider);
-    final presence = ref.watch(presentedPresenceProvider);
     final failed = directory.hasError || registered.hasError;
     final loading =
         controller.busy ||
@@ -109,7 +107,8 @@ class PrototypeAgentsSheet extends HookConsumerWidget {
           icon: const Icon(Icons.close),
           onPressed: () => Navigator.pop(context),
         ),
-        trailing: TextButton(
+        trailing: IconButton(
+          tooltip: 'Add agent',
           onPressed: community == null || controller.busy
               ? null
               : () => showBuzzModalBottomSheet<bool>(
@@ -122,7 +121,7 @@ class PrototypeAgentsSheet extends HookConsumerWidget {
                     onCreated: () => ref.invalidate(agentDirectoryProvider),
                   ),
                 ),
-          child: const Text('Add agent'),
+          icon: const Icon(Icons.add),
         ),
         child: RefreshIndicator(
           onRefresh: refresh,
@@ -161,6 +160,7 @@ class PrototypeAgentsSheet extends HookConsumerWidget {
                   key: ValueKey(key),
                   contentPadding: const EdgeInsets.symmetric(
                     horizontal: Grid.xxs,
+                    vertical: Grid.xxs,
                   ),
                   leading: AvatarImage(
                     imageUrl: profiles[key]?.avatarUrl,
@@ -172,19 +172,6 @@ class PrototypeAgentsSheet extends HookConsumerWidget {
                     ),
                   ),
                   title: Text(names.labelFor(key)),
-                  subtitle: presence[key] == 'online'
-                      ? Row(
-                          children: [
-                            Icon(
-                              Icons.circle,
-                              size: Grid.xxs,
-                              color: context.appColors.success,
-                            ),
-                            const SizedBox(width: Grid.half),
-                            const Text('Online'),
-                          ],
-                        )
-                      : null,
                   onTap: () => Navigator.pop(context, key),
                 ),
             ],

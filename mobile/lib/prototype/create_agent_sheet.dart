@@ -36,6 +36,38 @@ class CreatePrototypeAgentSheet extends HookConsumerWidget {
     final active = ref.watch(activeCommunityProvider).asData?.value;
     final sameCommunity = active?.id == community.id;
     final pending = controller.pending != null;
+    final canCreate =
+        !controller.busy && sameCommunity && name.text.trim().isNotEmpty;
+    final actionStyle = IconButton.styleFrom(
+      minimumSize: const Size.square(44),
+      backgroundColor: context.colors.surfaceContainerHighest,
+      side: BorderSide(color: context.colors.outlineVariant),
+      shape: const CircleBorder(),
+    );
+    InputDecoration fieldDecoration(String label, {String? hint}) =>
+        InputDecoration(
+          labelText: label,
+          floatingLabelBehavior: FloatingLabelBehavior.always,
+          hintText: hint,
+          filled: true,
+          fillColor: context.colors.surfaceContainerHighest,
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: Grid.xs,
+            vertical: Grid.xs,
+          ),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(Radii.container),
+            borderSide: BorderSide.none,
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(Radii.container),
+            borderSide: BorderSide.none,
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(Radii.container),
+            borderSide: BorderSide.none,
+          ),
+        );
 
     Future<void> create() async {
       error.value = null;
@@ -91,16 +123,28 @@ class CreatePrototypeAgentSheet extends HookConsumerWidget {
         ),
         child: BuzzTitledSheetLayout(
           title: 'Create agent',
-          leading: TextButton(
+          leading: IconButton(
+            tooltip: 'Cancel',
+            style: actionStyle,
             onPressed: controller.busy ? null : () => Navigator.pop(context),
-            child: const Text('Cancel'),
+            icon: const Icon(Icons.close),
           ),
-          trailing: TextButton(
-            onPressed:
-                controller.busy || !sameCommunity || name.text.trim().isEmpty
-                ? null
-                : create,
-            child: Text(pending ? 'Resume' : 'Create'),
+          trailing: IconButton(
+            tooltip: pending ? 'Resume' : 'Create',
+            style: actionStyle.copyWith(
+              backgroundColor: WidgetStatePropertyAll(
+                canCreate
+                    ? context.colors.primary
+                    : context.colors.surfaceContainerHighest,
+              ),
+              foregroundColor: WidgetStatePropertyAll(
+                canCreate
+                    ? context.colors.onPrimary
+                    : context.colors.onSurfaceVariant,
+              ),
+            ),
+            onPressed: canCreate ? create : null,
+            icon: const Icon(Icons.check),
           ),
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(Grid.gutter),
@@ -112,27 +156,20 @@ class CreatePrototypeAgentSheet extends HookConsumerWidget {
                   autofocus: true,
                   enabled: !controller.busy && !pending,
                   textCapitalization: TextCapitalization.words,
-                  decoration: const InputDecoration(
-                    labelText: 'Display name',
-                    border: OutlineInputBorder(),
-                  ),
+                  decoration: fieldDecoration('Name'),
                 ),
                 const SizedBox(height: Grid.sm),
                 TextField(
                   controller: instructions,
                   enabled: !controller.busy && !pending,
                   minLines: 4,
-                  maxLines: 7,
-                  decoration: const InputDecoration(
-                    labelText: 'Instructions (optional)',
-                    hintText: 'Describe what this agent should do.',
-                    border: OutlineInputBorder(),
+                  maxLines: 6,
+                  textCapitalization: TextCapitalization.sentences,
+                  textInputAction: TextInputAction.newline,
+                  decoration: fieldDecoration(
+                    'Instructions (optional)',
+                    hint: 'Describe what this agent should do.',
                   ),
-                ),
-                const SizedBox(height: Grid.xs),
-                Text(
-                  'Runs remotely and responds to you in ${community.name}.',
-                  style: context.textTheme.bodySmall,
                 ),
                 if (controller.busy) ...[
                   const SizedBox(height: Grid.xs),
