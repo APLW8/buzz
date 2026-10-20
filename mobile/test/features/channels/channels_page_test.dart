@@ -62,6 +62,7 @@ import '../../helpers/thread_ids.dart';
 
 part 'channels_page_test/presence_tests.dart';
 part 'channels_page_test/unread_readiness_tests.dart';
+part 'channels_page_test/filter_feedback_tests.dart';
 
 void main() {
   setUpAll(() async {
@@ -159,6 +160,7 @@ void main() {
   }
 
   _communityUnreadLandingTests(buildTestable);
+  _filterFeedbackTests(buildTestable);
 
   final testChannels = [
     Channel(

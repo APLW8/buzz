@@ -300,7 +300,7 @@ class _SliverChannelsList extends HookConsumerWidget {
       final evidence = activity[channel.id];
       return channelMatchesFilter(
         mode: filters?.store.modeFor(group) ?? ChannelFilterMode.all,
-        unread: unreadState.contains(channel.id),
+        unread: unreadChannelIds.contains(channel.id),
         activitySeconds: evidence?.asData?.value,
         activityKnown: evidence?.asData != null,
         nowSeconds: now,
