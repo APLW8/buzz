@@ -18,7 +18,7 @@ void main() {
     () async {
       final keys = nostr.Keys.generate();
       final old = DateTime.now().millisecondsSinceEpoch ~/ 1000 - 8 * 86400;
-      final event = NostrEvent.fromJson(
+      NostrEvent activityEvent(int at) => NostrEvent.fromJson(
         nostr.Event.from(
           kind: EventKind.streamMessage,
           tags: [
@@ -26,11 +26,11 @@ void main() {
           ],
           content: 'Earlier activity',
           secretKey: nostr.Nip19.decode(payload: keys.nsec).data,
-          createdAt: old,
+          createdAt: at,
           verify: false,
         ).toMap(),
       );
-      final session = _ActivitySession(event);
+      final session = _ActivitySession(activityEvent(old));
       final container = ProviderContainer(
         overrides: [
           channelsProvider.overrideWith(_ActivityChannels.new),
@@ -60,6 +60,32 @@ void main() {
         ),
         isFalse,
       );
+      // A relay-accepted future head must stay unknown, not become known empty.
+      for (final drift in [450, 600, 900]) {
+        session.event = activityEvent(
+          DateTime.now().millisecondsSinceEpoch ~/ 1000 + drift,
+        );
+        container.invalidate(channelFilterActivityProvider('quiet-channel'));
+        await expectLater(
+          container.read(channelFilterActivityProvider('quiet-channel').future),
+          throwsFormatException,
+        );
+        final evidence = container.read(
+          channelFilterActivityProvider('quiet-channel'),
+        );
+        expect(evidence.hasError, isTrue);
+        expect(
+          channelMatchesFilter(
+            mode: ChannelFilterMode.active,
+            unread: false,
+            activitySeconds: evidence.asData?.value,
+            activityKnown: evidence.asData != null,
+            nowSeconds: old + 8 * 86400,
+            windowSeconds: 7 * 86400,
+          ),
+          isTrue,
+        );
+      }
     },
   );
 
@@ -358,7 +384,7 @@ class _ActivityChannels extends ChannelsNotifier {
 
 class _ActivitySession extends RelaySessionNotifier {
   _ActivitySession(this.event);
-  final NostrEvent event;
+  NostrEvent event;
   int requests = 0;
   @override
   SessionState build() => const SessionState(status: SessionStatus.connected);

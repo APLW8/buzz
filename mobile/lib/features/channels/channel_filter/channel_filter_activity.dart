@@ -17,6 +17,9 @@ int? verifiedFilterActivity(List<Map<String, dynamic>> records) {
     final at = record['created_at'] as int;
     if (at <= now + 300 && (latest == null || at > latest)) latest = at;
   }
+  if (records.isNotEmpty && latest == null) {
+    throw const FormatException('Activity history has no acceptable timestamp');
+  }
   return latest;
 }
 
@@ -91,4 +94,4 @@ final channelFilterActivityProvider = FutureProvider.autoDispose
             .toList();
         return compute(verifiedFilterActivity, matching);
       });
-    });
+    }, retry: (_, _) => null);
