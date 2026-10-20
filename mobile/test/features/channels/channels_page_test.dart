@@ -295,48 +295,63 @@ void main() {
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
-      final manager = _filterTestManager(failPublish: true)..ready = true;
-      await tester.pumpWidget(
-        buildTestable(
-          textScaler: const TextScaler.linear(2),
-          overrides: [
-            channelsProvider.overrideWith(() => _FakeNotifier(testChannels)),
-            channelFilterProvider.overrideWithValue(manager),
-          ],
-        ),
-      );
-      await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Channels options'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Active'));
-      await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('7 days'));
-      await tester.tap(find.text('7 days'));
-      await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('Apply'));
-      await tester.tap(find.text('Apply'));
-      await tester.pumpAndSettle();
-      expect(
-        find.text(
+      final semantics = tester.ensureSemantics();
+      try {
+        final manager = _filterTestManager(failPublish: true)..ready = true;
+        await tester.pumpWidget(
+          buildTestable(
+            textScaler: const TextScaler.linear(2),
+            overrides: [
+              channelsProvider.overrideWith(() => _FakeNotifier(testChannels)),
+              channelFilterProvider.overrideWithValue(manager),
+            ],
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('Channels options'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Active'));
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(find.text('7 days'));
+        await tester.tap(find.text('7 days'));
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(find.text('Apply'));
+        await tester.tap(find.text('Apply'));
+        await tester.pumpAndSettle();
+        expect(
+          find.text(
+            'Could not confirm the filter save. Your choices are kept; try again.',
+          ),
+          findsOneWidget,
+        );
+        final failure = find.text(
           'Could not confirm the filter save. Your choices are kept; try again.',
-        ),
-        findsOneWidget,
-      );
-      final selected = tester.widget<AppListRow>(
-        find.ancestor(
-          of: find.text('7 days'),
-          matching: find.byType(AppListRow),
-        ),
-      );
-      expect(selected.trailing, isA<Icon>());
-      await tester.tap(find.text('Cancel'));
-      await tester.pumpAndSettle();
-      expect(find.byType(AlertDialog), findsNothing);
-      expect(manager.store.modeFor('channels'), ChannelFilterMode.all);
-      expect(manager.store.windowFor('channels'), defaultActiveWindowSeconds);
-      expect(tester.takeException(), isNull);
-      await tester.pumpWidget(const SizedBox());
-      manager.dispose();
+        );
+        final status = tester.getSemantics(failure);
+        expect(status.getSemanticsData().flagsCollection.isLiveRegion, isTrue);
+        final errorRect = tester.getRect(failure);
+        final footerRect = tester.getRect(find.text('Retry'));
+        expect(errorRect.top, greaterThanOrEqualTo(0));
+        expect(errorRect.bottom, lessThanOrEqualTo(footerRect.top));
+        expect(footerRect.bottom, lessThanOrEqualTo(844));
+        final selected = tester.widget<AppListRow>(
+          find.ancestor(
+            of: find.text('7 days'),
+            matching: find.byType(AppListRow),
+          ),
+        );
+        expect(selected.trailing, isA<Icon>());
+        await tester.tap(find.text('Cancel'));
+        await tester.pumpAndSettle();
+        expect(find.byType(AlertDialog), findsNothing);
+        expect(manager.store.modeFor('channels'), ChannelFilterMode.all);
+        expect(manager.store.windowFor('channels'), defaultActiveWindowSeconds);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+        manager.dispose();
+      } finally {
+        semantics.dispose();
+      }
     },
   );
 

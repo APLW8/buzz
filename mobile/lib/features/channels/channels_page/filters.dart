@@ -224,16 +224,14 @@ class _SectionViewSheet extends HookConsumerWidget {
                           const Text(
                             'Filters are read-only until preferences load from the community.',
                           ),
-                        if (manager?.error != null && !failed.value)
+                        if (manager?.ready != true &&
+                            manager?.error != null &&
+                            !failed.value)
                           TextButton(
                             onPressed: manager?.busy == true
                                 ? null
                                 : manager?.refresh,
                             child: const Text('Retry loading preferences'),
-                          ),
-                        if (failed.value)
-                          const Text(
-                            'Could not confirm the filter save. Your choices are kept; try again.',
                           ),
                         if (custom) ...[
                           const Divider(),
@@ -262,6 +260,20 @@ class _SectionViewSheet extends HookConsumerWidget {
                     ),
                   ),
                 ),
+                if (failed.value)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: Grid.gutter,
+                      vertical: Grid.xxs,
+                    ),
+                    child: Semantics(
+                      liveRegion: true,
+                      child: Text(
+                        'Could not confirm the filter save. Your choices are kept; try again.',
+                        style: TextStyle(color: context.colors.error),
+                      ),
+                    ),
+                  ),
                 const SizedBox(height: Grid.xxs),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: Grid.gutter),
