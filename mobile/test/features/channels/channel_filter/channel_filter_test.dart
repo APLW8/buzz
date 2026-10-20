@@ -138,16 +138,16 @@ void main() {
     },
   );
   test(
-    'rejects unsupported metadata, invalid durations and oversized records',
+    'salvages invalid durations but rejects unsupported metadata and oversized records',
     () {
       for (final invalid in [0, 86399, 86401, 366 * 86400, '86400']) {
         expect(
-          () => ChannelFilterStore.parse({
+          ChannelFilterStore.parse({
             'version': 1,
             'groups': {},
             'activeWindowSeconds': {'channels': invalid},
-          }),
-          throwsFormatException,
+          }).windowFor('channels'),
+          defaultActiveWindowSeconds,
         );
       }
       expect(
@@ -306,6 +306,54 @@ void main() {
       subject.dispose();
     },
   );
+  test(
+    'signed malformed siblings are salvaged and explicitly saved as a repaired head',
+    () async {
+      final malformed = {
+        'version': 1,
+        'groups': {'channels': 'active', 'forums': 'invalid', 'dms': 'active'},
+        'activeWindowSeconds': {'channels': 604800, 'forums': -1},
+        'future': {'keep': true},
+        'meta': {
+          'v': 1,
+          'g': {
+            'channels': [12, '0000000000000000', 'active'],
+            'forums': ['bad', '0000000000000000', 'unreads'],
+            'dms': [13, '0000000000000000', null],
+          },
+        },
+      };
+      history = [signed(crypto.encrypt(jsonEncode(malformed)), 10)];
+      // A cached sibling must never be promoted into the repair.
+      final subject = manager(
+        startup: ChannelFilterStore.empty().edit(
+          'starred',
+          ChannelFilterMode.unreads,
+        ),
+      );
+      await subject.refresh();
+      expect(subject.ready, isTrue);
+      expect(subject.store.modeFor('channels'), ChannelFilterMode.active);
+      expect(subject.store.modeFor('forums'), ChannelFilterMode.all);
+      expect(subject.store.modeFor('dms'), ChannelFilterMode.all);
+      expect(subject.store.modeFor('starred'), ChannelFilterMode.all);
+      expect(publishes, 0);
+      await subject.save('forums', ChannelFilterMode.unreads);
+      final repaired = jsonDecode(crypto.decrypt(history.single.content));
+      expect(
+        repaired['meta']['g']['channels'],
+        (malformed['meta'] as Map)['g']['channels'],
+      );
+      expect(repaired['meta']['g']['dms'][2], isNull);
+      expect(repaired['activeWindowSeconds'], {'channels': 604800});
+      expect(repaired['groups'], {'channels': 'active', 'forums': 'unreads'});
+      expect(repaired['future'], malformed['future']);
+      expect(subject.ready, isTrue);
+      expect(cached.last.toJson(), repaired);
+      subject.dispose();
+    },
+  );
+
   test('OK without matching readback is failure', () async {
     final subject = manager();
     await subject.refresh();

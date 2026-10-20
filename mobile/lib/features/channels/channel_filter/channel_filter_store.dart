@@ -24,51 +24,59 @@ class ChannelFilterStore {
       throw const FormatException('Unsupported channel filter');
     }
     final copy = jsonDecode(jsonEncode(record)) as Map<String, dynamic>;
-    final groups = copy['groups'];
-    if (groups is! Map ||
-        groups.length > 104 ||
-        groups.entries.any((e) => !_key(e.key) || !_mode(e.value))) {
-      throw const FormatException('Invalid filter groups');
+    // Salvage individual v1 nodes from the authenticated relay head. Never use
+    // the display cache for repair, and never reinterpret a future schema.
+    Map<String, dynamic> salvage(
+      Object? value,
+      bool Function(Object?) valid, {
+      int limit = 104,
+    }) {
+      if (value is! Map) return {};
+      final result = <String, dynamic>{};
+      for (final entry in value.entries) {
+        if (_key(entry.key) && valid(entry.value)) {
+          result[entry.key as String] = entry.value;
+          if (result.length > limit) {
+            throw const FormatException('Filter node budget exceeded');
+          }
+        }
+      }
+      return result;
     }
-    final windows = copy['activeWindowSeconds'];
-    if (windows != null &&
-        (windows is! Map ||
-            windows.length > 104 ||
-            windows.entries.any(
-              (e) => !_key(e.key) || !validActiveWindow(e.value),
-            ))) {
-      throw const FormatException('Invalid activity windows');
+
+    copy['groups'] = salvage(copy['groups'], _mode);
+    if (copy.containsKey('activeWindowSeconds')) {
+      copy['activeWindowSeconds'] = salvage(
+        copy['activeWindowSeconds'],
+        validActiveWindow,
+      );
     }
-    final meta = copy['meta'];
-    if (meta != null) {
-      if (meta is! Map ||
-          meta['v'] != 1 ||
-          meta.keys.any((k) => k != 'v' && k != 'g') ||
-          (meta['g'] != null && meta['g'] is! Map)) {
+    if (copy['meta'] != null) {
+      final raw = copy['meta'];
+      if (raw is Map && raw['v'] != null && raw['v'] != 1) {
         throw const FormatException('Unsupported filter metadata');
       }
-      meta['g'] ??= <String, dynamic>{};
-      var projectedCount = 0;
-      for (final entry in (meta['g'] as Map).entries) {
-        if (entry.value is List &&
-            (entry.value as List).length == 3 &&
-            (entry.value as List)[2] != null) {
-          projectedCount++;
-        }
-        final r = entry.value;
-        if (!_key(entry.key) ||
-            r is! List ||
-            r.length != 3 ||
-            r[0] is! int ||
-            r[0] < 0 ||
-            r[0] > 9007199254740991 ||
-            r[1] is! String ||
-            !RegExp(r'^[0-9a-f]{16}$').hasMatch(r[1]) ||
-            (r[2] != null && r[2] != 'unreads' && r[2] != 'active')) {
-          throw const FormatException('Invalid filter register');
-        }
-      }
-      if (projectedCount > 104) {
+      final registers = salvage(
+        raw is Map ? raw['g'] : null,
+        (r) =>
+            r is List &&
+            r.length == 3 &&
+            r[0] is int &&
+            r[0] >= 0 &&
+            r[0] <= 9007199254740991 &&
+            r[1] is String &&
+            RegExp(r'^[0-9a-f]{16}$').hasMatch(r[1]) &&
+            (r[2] == null || r[2] == 'unreads' || r[2] == 'active'),
+        limit: 2048,
+      );
+      copy['meta'] = {if (raw is Map) ...raw, 'v': 1, 'g': registers};
+      // Metadata remains authoritative: dropping an invalid register must not
+      // resurrect its stale legacy projection (including an All tombstone).
+      copy['groups'] = {
+        for (final entry in registers.entries)
+          if ((entry.value as List)[2] != null) entry.key: entry.value[2],
+      };
+      if ((copy['groups'] as Map).length > 104) {
         throw const FormatException('Filter group budget exceeded');
       }
     }
