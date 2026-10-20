@@ -70,18 +70,14 @@ class _AgentsNavigation extends HookConsumerWidget {
                         color: context.colors.surface,
                         child: SizedBox.expand(
                           child: BuzzTitledSheetLayout(
-                            title: 'Agent',
+                            title: '',
                             leading: IconButton(
                               tooltip: 'Back',
                               icon: const Icon(Icons.arrow_back_ios_new),
                               onPressed: () =>
                                   Navigator.of(detailContext).pop(),
                             ),
-                            trailing: IconButton(
-                              tooltip: 'Close',
-                              icon: const Icon(Icons.close),
-                              onPressed: () => Navigator.of(context).pop(),
-                            ),
+                            trailing: const SizedBox.shrink(),
                             child: UserProfileSheet(
                               pubkey: pubkey,
                               primaryActionsSpacing: Grid.md,
