@@ -16,8 +16,15 @@ pub(super) mod postgres_tests {
         let owner = Keys::generate();
         state
             .db
-            .add_relay_member(community, &owner.public_key().to_hex(), "owner", None)
+            .add_relay_member(
+                community,
+                &owner.public_key().to_hex(),
+                "owner",
+                None,
+                &state.relay_keypair,
+            )
             .await
+            .map(|write| write.outcome)
             .unwrap();
         (state, host, community, owner)
     }
