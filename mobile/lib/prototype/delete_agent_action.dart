@@ -82,7 +82,7 @@ class DeleteAgentAction extends HookConsumerWidget {
     }
 
     return Padding(
-      padding: const EdgeInsets.only(top: Grid.xs),
+      padding: EdgeInsets.zero,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [

@@ -84,6 +84,8 @@ class _AgentsNavigation extends HookConsumerWidget {
                             ),
                             child: UserProfileSheet(
                               pubkey: pubkey,
+                              primaryActionsSpacing: Grid.md,
+                              contextualActionsSpacing: Grid.xxs,
                               contextualActions: (_) => DeleteAgentAction(
                                 controller: controller,
                                 pubkey: pubkey,
