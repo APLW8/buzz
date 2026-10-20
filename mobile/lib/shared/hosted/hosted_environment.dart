@@ -8,6 +8,7 @@ abstract final class HostedEnvironment {
     'communities.buzz.xyz': 'https://app.builderlab.xyz',
     'communities.public.builderlabstaging.xyz':
         'https://app.builderlabstaging.xyz',
+    'communities.test.blockstaging.build': 'https://test.blockstaging.build',
   };
 
   /// Creation and admission use the same trusted build-specific host mapping.
@@ -57,6 +58,10 @@ abstract final class HostedEnvironment {
       return null;
     }
     final host = relay.host.toLowerCase();
+    // The existing bb-block staging community predates community subdomains.
+    if (host == 'buzz.test.blockstaging.build') {
+      return Uri.parse('https://test.blockstaging.build');
+    }
     for (final entry in _communityAccounts.entries) {
       if (host.endsWith('.${entry.key}')) return Uri.parse(entry.value);
     }
@@ -75,6 +80,7 @@ abstract final class HostedEnvironment {
     if (!{
       'https://app.builderlab.xyz',
       'https://app.builderlabstaging.xyz',
+      'https://test.blockstaging.build',
     }.contains(configured)) {
       throw StateError('Unsupported hosted account environment');
     }

@@ -171,7 +171,10 @@ class RemoteAgentController extends ChangeNotifier {
   Future<void> initialize() => _initialization ??= _initialize();
 
   Future<void> _initialize() async {
-    if (HostedEnvironment.origin.host != 'app.builderlabstaging.xyz') {
+    if (!{
+      'app.builderlabstaging.xyz',
+      'test.blockstaging.build',
+    }.contains(HostedEnvironment.origin.host)) {
       throw StateError(
         'This prototype requires the staging build configuration.',
       );

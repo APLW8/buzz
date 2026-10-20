@@ -9,7 +9,10 @@ import '../shared/hosted/hosted_environment.dart';
 Future<List<AddCommunityDeepLink>> loadPrototypeOwnedCommunities(
   BuilderlabAccountClient account,
 ) async {
-  if (HostedEnvironment.origin.host != 'app.builderlabstaging.xyz') {
+  if (!{
+    'app.builderlabstaging.xyz',
+    'test.blockstaging.build',
+  }.contains(HostedEnvironment.origin.host)) {
     throw StateError('Owned-community prototype requires staging.');
   }
   final response = await account.post('/v1/buzz/communities/list', {});

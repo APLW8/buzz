@@ -116,3 +116,24 @@ complete sign-in/current-community readiness, scan the hand-authored demo QR wit
 Camera, verify no automatic creation, edit/submit, and verify avatar persistence
 and a real agent response. Source/widget tests and QR image decoding do not prove
 these physical-device steps. No production or conference-release inclusion.
+
+## bb-block staging preparation
+
+The explicit internal staging build target is
+`BUZZ_BUILDERLAB_URL=https://test.blockstaging.build`, with
+`BUZZ_AUTH_DOMAINS=buzz.test.blockstaging.build,communities.test.blockstaging.build`.
+Only the existing `buzz.test.blockstaging.build` relay and community subdomains
+map to that account origin. The login origin, push host and arbitrary sibling
+hosts are not accepted as community relays. Public staging sessions and
+account-scoped identities remain separate; do not transfer tokens across realms.
+
+This configuration is prepared, not physically validated or installed. The
+bb-block edge is WARP-only. Historical BYOD access evidence covers the exact
+relay and push hosts, not the login origin. Native OAuth eligibility and the
+owner's `ENABLE_BEEKEEPER_AGENT_REGISTRY` flag still need verification. Switching
+build targets does not bypass network policy or recover an existing identity.
+The prototype's owned-community listing also does not replace normal onboarding's
+joined-community discovery and identity recovery.
+
+For standalone physical testing, use Xcode's **Profile** configuration. Debug
+Flutter builds require a debugger and cannot validate normal Home/Camera launch.
