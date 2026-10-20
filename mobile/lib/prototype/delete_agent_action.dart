@@ -86,13 +86,22 @@ class DeleteAgentAction extends HookConsumerWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          OutlinedButton.icon(
+          FilledButton(
             onPressed: controller.busy ? null : remove,
-            style: OutlinedButton.styleFrom(
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(double.infinity, Grid.xxl),
+              padding: const EdgeInsets.symmetric(
+                horizontal: Grid.gutter,
+                vertical: Grid.xs,
+              ),
+              backgroundColor: context.colors.surfaceContainerHighest,
               foregroundColor: context.colors.error,
+              textStyle: context.textTheme.titleSmall,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(Radii.dialog),
+              ),
             ),
-            icon: const Icon(Icons.delete_outline),
-            label: Text(controller.busy ? 'Working…' : 'Delete agent'),
+            child: Text(controller.busy ? 'Working…' : 'Delete agent'),
           ),
           if (error.value != null)
             Text(error.value!, style: TextStyle(color: context.colors.error)),
