@@ -164,6 +164,13 @@ while it lasts, without durable revocation. Claims resume after timeout expiry.
 Claim credentials are verified without user writes. Successful claims commit
 verified ownership with membership, policy evidence, and v2 consumption.
 Rejected claims create no users or owner links.
+Minting with a verified owner that differs from an agent's recorded owner
+returns HTTP 403 `invite_owner_mismatch`; a storage failure while establishing
+that link remains HTTP 503. Web, desktop, and mobile claim errors explain
+`invite_restricted` as an account or issuer restriction in this community:
+contact a community administrator, or retry after a temporary restriction ends.
+`invite_owner_mismatch` asks for the correct account or owner identity. Neither
+error suggests a fresh link as a workaround, and neither automatically retries.
 Claim and mint restriction reads use the writer inside a transaction serialized
 with community restriction and agent-owner writes. Admission committed first
 precedes the ban; a ban committed first prevents subsequent admission. Restriction
@@ -184,17 +191,33 @@ all serving pods and retain it on compatible rollbacks; rolling back to a versio
 without this setting's enforcement restores legacy acceptance until natural expiry.
 This change does not choose or deploy a cutoff.
 
-Migration 0067 is an expand step: it adds `revoked_at` and
-`legacy_admission`, and does not rewrite existing invite rows. Before applying
-it, reconcile any previously applied invitation migration version with the
-schema and migration history. Pause invitation minting and claiming and ban
-lifts; apply migration 0067; deploy the new relay and drain all old writers;
-then keep admission paused until the separately reviewed, fenced historical
-repair completes. Resume only after it reports zero unrepaired invites and
-only new relay code is serving. The repair processes active communities and
-leaves a skipped community's legacy markers in place until it can be repaired.
-A rollback to code that ignores `revoked_at` also requires invitation admission
-to remain paused. Legacy owner attribution uses the agent's currently recorded
+The historical maintenance companion must be separately reviewed and approved
+**before deploying this core change**. Both steps belong to the same controlled
+rollout: leaving unrepaired rows serving indefinitely would extend historical
+restriction rejection until their repair. Migration 0067 is schema-only: it adds
+`revoked_at` and `legacy_admission` without rewriting existing invite rows.
+Reconcile any previously applied invitation migration version with the schema
+and migration history before applying it.
+
+There is no invitation-maintenance feature switch. Operators must prevent
+invitation mint/claim, ban lifts, and **new timeout/mute restrictions** throughout
+the drain/repair interval, including signed events, HTTP, administrative tools,
+background jobs and direct writers. If this cannot be enforced for every writer
+with existing operational controls, use a maintenance window: remove public
+traffic, stop all relay instances and other writers, drain in-flight work and
+verify no old writer remains. Keep them stopped while applying schema 0067 and
+running the separately approved repair with its isolated operator connection.
+Prepare only new-code instances; do not reopen traffic or restart other writers
+until repair validation succeeds. Readers that may run before repair must use
+new code, which rejects historical restrictions lazily on unrepaired legacy rows.
+
+The repair must report zero unrepaired invites in active communities and an
+idempotent second run before reopening. Review every skipped/fenced community;
+keep it closed until it is active and repaired, then recheck zero before admitting
+traffic. After repair, timeouts/mutes only block temporarily; active bans still
+revoke permanently. A rollback to code that ignores `revoked_at` requires
+invitation admission paused, using the same traffic/writer controls if needed.
+Legacy owner attribution uses the agent's currently recorded
 `agent_owner_pubkey`; deleting an owner user row out of band clears that link
 through its foreign key, so a later repair cannot recover the former
 relationship. Reconcile before any external user-row cleanup that could erase

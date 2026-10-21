@@ -1241,7 +1241,8 @@ async fn submit_event_authed(
         }
     };
     if let Some(owner) = nip_oa_owner {
-        super::relay_members::materialize_nip_oa_owner(state, tenant, &pubkey, &owner).await;
+        let _ =
+            super::relay_members::materialize_nip_oa_owner(state, tenant, &pubkey, &owner).await;
     }
 
     let auth = IngestAuth::Http {
@@ -8675,7 +8676,7 @@ pub(crate) mod postgres_tests {
             .unwrap()
         };
 
-        assert!(materialize().await, "first call records the link");
+        assert!(materialize().await.unwrap(), "first call records the link");
         assert_eq!(agent_rows().await, 1);
 
         // Remove the row behind the cache's back: a call that still wrote
@@ -8686,7 +8687,10 @@ pub(crate) mod postgres_tests {
             .execute(state.db.pool())
             .await
             .unwrap();
-        assert!(materialize().await, "a known link is still confirmed");
+        assert!(
+            materialize().await.unwrap(),
+            "a known link is still confirmed"
+        );
         assert_eq!(agent_rows().await, 0, "a known link writes nothing");
     }
 

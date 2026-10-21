@@ -320,12 +320,19 @@ async fn mint_invite_checked(
         super::relay_members::extract_auth_tag_header(&headers),
         signed_created_at,
     ) {
-        if !super::relay_members::materialize_nip_oa_owner(&state, &tenant, &pubkey, &owner).await {
-            return api_error(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "restriction lookup unavailable",
-            )
-            .into_response();
+        match super::relay_members::materialize_nip_oa_owner(&state, &tenant, &pubkey, &owner).await
+        {
+            Ok(true) => {}
+            Ok(false) => {
+                return api_error(StatusCode::FORBIDDEN, "invite_owner_mismatch").into_response();
+            }
+            Err(_) => {
+                return api_error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "restriction lookup unavailable",
+                )
+                .into_response();
+            }
         }
     }
 
@@ -1953,11 +1960,7 @@ mod postgres_tests {
     const NIP_FI_TEST_ISSUER: &str = "https://issuer.example";
     const NIP_FI_TEST_AUDIENCE: &str = "https://relay.example";
     const NIP_FI_TEST_KID: &str = "test-key-1";
-    const NIP_FI_TEST_EC_PKCS8_PEM: &str = "-----BEGIN PRIVATE KEY-----\n\
-        MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgcnxDM4EiirH9dHUE\n\
-        WZc759TX4s5PAn8kO5ovXSnGxCWhRANCAARFb6ZnsfkqOOXyEhj3KBQphGKF4vTa\n\
-        zhebbavbZ1ZoklqkF1cGg+jTO7rONAVEzXvXUWtV6CdDV+rybiVmFP2w\n\
-        -----END PRIVATE KEY-----\n";
+    const NIP_FI_TEST_EC_PKCS8_PEM: &str = "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgcnxDM4EiirH9dHUE\nWZc759TX4s5PAn8kO5ovXSnGxCWhRANCAARFb6ZnsfkqOOXyEhj3KBQphGKF4vTa\nzhebbavbZ1ZoklqkF1cGg+jTO7rONAVEzXvXUWtV6CdDV+rybiVmFP2w\n-----END PRIVATE KEY-----\n"; // sadscan:disable np.pem.1 kingfisher.privkey.2 -- public ES256 test fixture
 
     /// Clone `base` into an Enforce-mode state. With `with_verifier`, a real
     /// ES256 verifier over the static test key is injected so a signed

@@ -244,7 +244,7 @@ pub(super) mod postgres_tests {
 
     #[tokio::test]
     #[ignore = "requires Postgres"]
-    async fn cutoff_rejects_only_v1_and_restriction_lookup_failure_never_admits() {
+    async fn cutoff_rejects_only_v1_and_restriction_or_owner_lookup_failure_never_admits() {
         let Some(identity) = [
             "NEXTEST_RUN_ID",
             "NEXTEST_BINARY_ID",
@@ -318,6 +318,49 @@ pub(super) mod postgres_tests {
             .unwrap();
         assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
         assert!(!membership.unwrap());
+
+        // Fail specifically inside owner materialization, after membership and
+        // ban reads succeed. This fixture is wrapper-owned, as checked above.
+        let owner = Keys::generate();
+        let tag = buzz_sdk::nip_oa::compute_auth_tag(&owner, &issuer.public_key(), "").unwrap();
+        let before: i64 = sqlx::query_scalar("SELECT count(*) FROM relay_invites")
+            .fetch_one(state.db.pool())
+            .await
+            .unwrap();
+        // Keep restriction and membership reads healthy, but reject the new
+        // owner's insert in the production materialization helper.
+        sqlx::query(
+            "ALTER TABLE users ADD CONSTRAINT test_owner_write_failure CHECK (false) NOT VALID",
+        )
+        .execute(state.db.pool())
+        .await
+        .unwrap();
+        let response = post_with_owner_tag(
+            state.clone(),
+            &host,
+            "/api/invites",
+            &issuer,
+            "{}".into(),
+            &tag,
+        )
+        .await;
+        sqlx::query("ALTER TABLE users DROP CONSTRAINT test_owner_write_failure")
+            .execute(state.db.pool())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            read_json(response).await["error"],
+            "restriction lookup unavailable"
+        );
+        let after: i64 = sqlx::query_scalar("SELECT count(*) FROM relay_invites")
+            .fetch_one(state.db.pool())
+            .await
+            .unwrap();
+        assert_eq!(
+            after, before,
+            "a storage failure must not mint an invitation"
+        );
     }
 
     fn wrapper_owns_database(url: &str, identity: &str) -> bool {

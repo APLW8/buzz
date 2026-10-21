@@ -12,6 +12,72 @@ mod postgres_tests {
 
     #[tokio::test]
     #[ignore = "requires Postgres"]
+    async fn mint_rejects_a_different_verified_owner_without_retrying_or_rebinding() {
+        let (state, host, community, agent) = fixture().await;
+        let recorded_owner = Keys::generate();
+        for key in [&agent, &recorded_owner] {
+            state
+                .db
+                .ensure_user_for_authorization(community, key.public_key().as_bytes())
+                .await
+                .unwrap();
+        }
+        assert!(state
+            .db
+            .set_agent_owner_for_authorization(
+                community,
+                agent.public_key().as_bytes(),
+                recorded_owner.public_key().as_bytes(),
+            )
+            .await
+            .unwrap());
+        let other_owner = Keys::generate();
+        let tag =
+            buzz_sdk::nip_oa::compute_auth_tag(&other_owner, &agent.public_key(), "").unwrap();
+        let response = post_with_owner_tag(
+            state.clone(),
+            &host,
+            "/api/invites",
+            &agent,
+            "{}".into(),
+            &tag,
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(read_json(response).await["error"], "invite_owner_mismatch");
+        assert!(state
+            .db
+            .is_agent_owner(
+                community,
+                agent.public_key().as_bytes(),
+                recorded_owner.public_key().as_bytes(),
+            )
+            .await
+            .unwrap());
+        let count: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM relay_invites WHERE community_id=$1")
+                .bind(community.as_uuid())
+                .fetch_one(state.db.pool())
+                .await
+                .unwrap();
+        assert_eq!(
+            count, 0,
+            "mismatched credentials must not mint an invitation"
+        );
+
+        // Healthy storage and the recorded owner still admit a signed mint.
+        let tag =
+            buzz_sdk::nip_oa::compute_auth_tag(&recorded_owner, &agent.public_key(), "").unwrap();
+        assert_eq!(
+            post_with_owner_tag(state, &host, "/api/invites", &agent, "{}".into(), &tag)
+                .await
+                .status(),
+            StatusCode::OK
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires Postgres"]
     async fn invalid_signed_claims_do_not_materialize_fresh_owner_identities() {
         let (state, host, community, _issuer) = fixture().await;
         let before = users(&state, community).await;

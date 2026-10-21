@@ -939,6 +939,7 @@ async fn run_active_audio_connection(
             };
             crate::api::relay_members::materialize_nip_oa_owner(&state, &tenant, &pubkey, &owner)
                 .await
+                .unwrap_or(false)
         };
         if !linked {
             shadow_attempt.refused();
@@ -4010,7 +4011,7 @@ mod tests {
         // Fix 5: use Config::for_test() which holds NIP_FI_ENV_LOCK internally. [FI-TRACE-ENV-RACE]
         let mut config = crate::config::Config::for_test();
         config.require_relay_membership = require_relay_membership;
-        config.database_url = "postgres://buzz:buzz_dev@127.0.0.1:1/buzz".to_string();
+        config.database_url = "postgres://buzz:buzz_dev@127.0.0.1:1/buzz".to_string(); // sadscan:disable np.postgres.1 -- local test-only credentials on a closed port
         config.redis_url = "redis://127.0.0.1:1".to_string();
         let mut pool_options = sqlx::postgres::PgPoolOptions::new();
         if let Some(timeout) = acquire_timeout {
