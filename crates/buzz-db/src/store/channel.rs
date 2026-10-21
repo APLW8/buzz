@@ -902,7 +902,7 @@ pub async fn update_channel(
             .await?;
     }
     let policy_changed = if updates.visibility.is_some() || updates.ttl_seconds.is_some() {
-        sqlx::query_scalar::<_,bool>("SELECT (($3::text IS NOT NULL AND visibility::text IS DISTINCT FROM $3) OR ($4 AND ttl_seconds IS DISTINCT FROM $5::int)) FROM channels WHERE community_id=$1 AND id=$2 FOR UPDATE")
+        sqlx::query_scalar::<_,bool>("SELECT (($3::text IS NOT NULL AND visibility::text IS DISTINCT FROM $3) OR ($4 AND ttl_seconds IS DISTINCT FROM $5::int)) FROM channels WHERE community_id=$1 AND id=$2 FOR NO KEY UPDATE")
             .bind(community_id.as_uuid()).bind(channel_id).bind(updates.visibility.as_deref())
             .bind(updates.ttl_seconds.is_some()).bind(updates.ttl_seconds.flatten())
             .fetch_optional(tx.conn()).await?.unwrap_or(false)
@@ -915,7 +915,7 @@ pub async fn update_channel(
     }
     if policy_changed {
         sqlx::query(
-            "UPDATE communities SET artifact_policy_modified_at=clock_timestamp() WHERE id=$1 AND EXISTS(SELECT 1 FROM artifact_heads WHERE community_id=$1 AND channel_id=$2)",
+            "UPDATE communities SET artifact_policy_modified_at=clock_timestamp() WHERE id=$1 AND (EXISTS(SELECT 1 FROM artifact_heads WHERE community_id=$1 AND channel_id=$2) OR EXISTS(SELECT 1 FROM artifact_revisions WHERE community_id=$1 AND source_channel_id=$2))",
         )
         .bind(community_id.as_uuid()).bind(channel_id)
         .execute(tx.conn())
@@ -1119,7 +1119,7 @@ pub async fn soft_delete_channel(
 
     if result.rows_affected() > 0 {
         sqlx::query(
-            "UPDATE communities SET artifact_policy_modified_at=clock_timestamp() WHERE id=$1 AND EXISTS(SELECT 1 FROM artifact_heads WHERE community_id=$1 AND channel_id=$2)",
+            "UPDATE communities SET artifact_policy_modified_at=clock_timestamp() WHERE id=$1 AND (EXISTS(SELECT 1 FROM artifact_heads WHERE community_id=$1 AND channel_id=$2) OR EXISTS(SELECT 1 FROM artifact_revisions WHERE community_id=$1 AND source_channel_id=$2))",
         )
         .bind(community_id.as_uuid()).bind(channel_id)
         .execute(tx.conn())

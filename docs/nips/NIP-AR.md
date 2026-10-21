@@ -123,7 +123,8 @@ The initial read pages through current identities. A later read supplies the
 last completed `checkpoint`. A continuation supplies only `cursor`, with
 the same `query`. The server signs these opaque strings. They bind the
 community, reader, exact query, access-policy boundary, and database start
-time. The cursor also binds the last page position. Relay instances use the
+time. Tokens contain a fixed-size digest of the query. The cursor also binds
+the last page position. Relay instances use the
 same configured signing identity, so another instance can serve a continuation.
 No server-side manifest or Redis allocation is required.
 
@@ -194,7 +195,8 @@ or remove. An empty delta does not confirm an accepted edit.
 ### Access recovery and bounds
 
 Relevant channel access changes atomically advance one community policy
-stamp. They do not update it on ordinary artifact writes. A different stamp
+stamp. The check includes channels with current heads or retained move-source
+records. Ordinary artifact writes do not update this stamp. A different stamp
 returns HTTP 409 `sync_reset` with `reason: "policy_changed"`, without naming
 private channels. A checkpoint older than 30 days returns the same code with
 `reason: "checkpoint_expired"`.

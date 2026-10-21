@@ -41,7 +41,7 @@ struct Token {
     version: u8,
     community: Uuid,
     reader: String,
-    query: Value,
+    query: String,
     at: DateTime<Utc>,
     policy: DateTime<Utc>,
     since: Option<DateTime<Utc>>,
@@ -97,11 +97,15 @@ fn encode(state: &AppState, token: &Token) -> Result<String, (StatusCode, Json<V
     let data = serde_json::to_vec(token).map_err(|_| unavailable())?;
     let mut signature = mac(state)?;
     signature.update(&data);
-    Ok(format!(
+    let encoded = format!(
         "{}.{}",
         URL_SAFE_NO_PAD.encode(&data),
         URL_SAFE_NO_PAD.encode(signature.finalize().into_bytes())
-    ))
+    );
+    if encoded.len() > 200_000 {
+        return Err(invalid());
+    }
+    Ok(encoded)
 }
 fn decode(state: &AppState, value: &str) -> Result<Token, (StatusCode, Json<Value>)> {
     if value.len() > 200_000 {
@@ -150,6 +154,9 @@ async fn execute(
         return Err(invalid());
     }
     let parsed = buzz_core::artifact::parse_query(&request.query).map_err(|_| invalid())?;
+    let query_binding = URL_SAFE_NO_PAD.encode(Sha256::digest(
+        serde_json::to_vec(&request.query).map_err(|_| invalid())?,
+    ));
     if parsed.view != ArtifactView::Current {
         return Err(invalid());
     }
@@ -215,7 +222,7 @@ async fn execute(
         if previous.version != 1
             || previous.community != *tenant.community().as_uuid()
             || previous.reader != reader.to_hex()
-            || previous.query != request.query
+            || previous.query != query_binding
             || previous.cursor != request.cursor.is_some()
             || previous.at > now
         {
@@ -243,7 +250,7 @@ async fn execute(
             version: 1,
             community: *tenant.community().as_uuid(),
             reader: reader.to_hex(),
-            query: request.query,
+            query: query_binding,
             at: now,
             policy,
             since: None,

@@ -252,3 +252,125 @@ async fn sync_gate_controls_http_reads_and_capability() {
         );
     }
 }
+
+#[tokio::test]
+#[ignore = "requires Postgres"]
+async fn sync_resets_when_a_move_source_loses_access() {
+    let _guard = SERIAL.lock().await;
+    for delete_channel in [false, true] {
+        let f = fixture().await;
+        let id = Uuid::new_v4();
+        let first = f.revision(id, "create", None);
+        accept(&f, &first).await;
+        let (_, read) = f
+            .request_as(
+                &f.peer,
+                "/query",
+                json!([{"artifact":"sync","query":query()}]),
+            )
+            .await;
+        let moved = f.revision_as(&f.owner, f.private, id, "move", Some(&first));
+        accept(&f, &moved).await;
+        let heads: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM artifact_heads WHERE community_id=$1 AND channel_id=$2",
+        )
+        .bind(f.community.as_uuid())
+        .bind(f.home)
+        .fetch_one(&f.pool)
+        .await
+        .unwrap();
+        assert_eq!(heads, 0);
+        if delete_channel {
+            assert!(
+                buzz_db::channel::soft_delete_channel(&f.pool, f.community, f.home)
+                    .await
+                    .unwrap()
+            );
+        } else {
+            buzz_db::channel::update_channel(
+                &f.pool,
+                f.community,
+                f.home,
+                buzz_db::channel::ChannelUpdate {
+                    visibility: Some("private".into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        }
+        let (status, delta) = f
+            .request_as(
+                &f.peer,
+                "/query",
+                json!([{"artifact":"sync","query":query(),"checkpoint":read["checkpoint"]}]),
+            )
+            .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(delta["reason"], "policy_changed");
+        assert!(!delta.to_string().contains(&f.home.to_string()));
+        let (status, current) = f
+            .request_as(
+                &f.peer,
+                "/query",
+                json!([{"artifact":"sync","action":"current","query":query(),"artifactIds":[id]}]),
+            )
+            .await;
+        assert!(status.is_success());
+        assert_eq!(
+            current["changes"],
+            json!([{"type":"remove","artifactId":id}])
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires Postgres"]
+async fn sync_policy_update_can_pass_a_channel_key_share() {
+    let _guard = SERIAL.lock().await;
+    let f = fixture().await;
+    let mut tx = f.pool.begin().await.unwrap();
+    sqlx::query("SELECT id FROM channels WHERE community_id=$1 AND id=$2 FOR KEY SHARE")
+        .bind(f.community.as_uuid())
+        .bind(f.home)
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+    tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        buzz_db::channel::update_channel(
+            &f.pool,
+            f.community,
+            f.home,
+            buzz_db::channel::ChannelUpdate {
+                visibility: Some("private".into()),
+                ..Default::default()
+            },
+        ),
+    )
+    .await
+    .expect("policy update must permit a foreign-key reader")
+    .unwrap();
+    tx.rollback().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires Postgres"]
+async fn sync_progress_replays_queries_with_escaped_values() {
+    let _guard = SERIAL.lock().await;
+    let f = fixture().await;
+    let scope = json!({"artifact":"current","#type":["buzz.task"],"#project":vec!["\u{1}".repeat(4096);15]});
+    let (status, first) = f
+        .request("/query", json!([{"artifact":"sync","query":scope}]))
+        .await;
+    assert!(status.is_success(), "{status}: {first}");
+    assert!(first["checkpoint"].as_str().unwrap().len() < 200_000);
+    let (status, next) = f
+        .request(
+            "/query",
+            json!([{"artifact":"sync","query":scope,"checkpoint":first["checkpoint"]}]),
+        )
+        .await;
+    assert!(status.is_success(), "{status}: {next}");
+    assert_eq!(next["changes"], json!([]));
+}
