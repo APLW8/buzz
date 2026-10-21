@@ -283,7 +283,6 @@ impl RelayInfo {
                 "version": 1, "revision_kind": 45010, "removal_kind": 45011,
                 "query": "/query", "count": "/count",
                 "modes": ["current", "history"],
-                "snapshot": crate::api::artifact_snapshot::capability(),
                 "websocket_query_extensions": false,
                 "max_tags": buzz_core::artifact::MAX_TAGS,
                 "max_tag_name_bytes": buzz_core::artifact::MAX_TAG_NAME_BYTES,
@@ -388,6 +387,9 @@ pub(crate) async fn nip11_document(state: &crate::state::AppState, raw_host: &st
         admin_api.as_deref(),
         state.config.klipy.as_ref().map(|_| "klipy"),
     );
+    if state.config.artifact_sync_enabled {
+        info.artifacts["sync"] = crate::api::artifact_sync::capability();
+    }
     if let Ok(tenant) = crate::tenant::bind_community(&state.db, raw_host).await {
         if state.config.buzz_v1_enabled {
             use buzz_db::personal_read::{ELIGIBLE_KINDS, MAX_CHANNELS, MAX_INTENTS};

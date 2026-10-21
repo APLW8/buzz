@@ -155,6 +155,7 @@ pub async fn create_channel(
         INSERT INTO channel_members (community_id, channel_id, pubkey, role, invited_by)
         VALUES ($1, $2, $3, 'owner', $4)
         ON CONFLICT (community_id, channel_id, pubkey) DO UPDATE SET
+            sync_modified_at = CASE WHEN channel_members.removed_at IS NOT NULL THEN clock_timestamp() ELSE channel_members.sync_modified_at END,
             removed_at = NULL,
             removed_by = NULL,
             role = EXCLUDED.role
@@ -391,6 +392,7 @@ async fn insert_channel_rows(
             INSERT INTO channel_members (community_id, channel_id, pubkey, role, invited_by)
             VALUES ($1, $2, $3, 'owner', $4)
             ON CONFLICT (community_id, channel_id, pubkey) DO UPDATE SET
+                sync_modified_at = CASE WHEN channel_members.removed_at IS NOT NULL THEN clock_timestamp() ELSE channel_members.sync_modified_at END,
                 removed_at = NULL,
                 removed_by = NULL,
                 role = EXCLUDED.role
@@ -899,9 +901,25 @@ pub async fn update_channel(
             .execute(tx.conn())
             .await?;
     }
+    let policy_changed = if updates.visibility.is_some() || updates.ttl_seconds.is_some() {
+        sqlx::query_scalar::<_,bool>("SELECT (($3::text IS NOT NULL AND visibility::text IS DISTINCT FROM $3) OR ($4 AND ttl_seconds IS DISTINCT FROM $5::int)) FROM channels WHERE community_id=$1 AND id=$2 FOR UPDATE")
+            .bind(community_id.as_uuid()).bind(channel_id).bind(updates.visibility.as_deref())
+            .bind(updates.ttl_seconds.is_some()).bind(updates.ttl_seconds.flatten())
+            .fetch_optional(tx.conn()).await?.unwrap_or(false)
+    } else {
+        false
+    };
     let result = q.execute(tx.conn()).await?;
     if result.rows_affected() == 0 {
         return Err(DbError::ChannelNotFound(channel_id));
+    }
+    if policy_changed {
+        sqlx::query(
+            "UPDATE communities SET artifact_policy_modified_at=clock_timestamp() WHERE id=$1 AND EXISTS(SELECT 1 FROM artifact_heads WHERE community_id=$1 AND channel_id=$2)",
+        )
+        .bind(community_id.as_uuid()).bind(channel_id)
+        .execute(tx.conn())
+        .await?;
     }
     tx.commit().await?;
 
@@ -1099,6 +1117,14 @@ pub async fn soft_delete_channel(
             .execute(tx.conn())
             .await?;
 
+    if result.rows_affected() > 0 {
+        sqlx::query(
+            "UPDATE communities SET artifact_policy_modified_at=clock_timestamp() WHERE id=$1 AND EXISTS(SELECT 1 FROM artifact_heads WHERE community_id=$1 AND channel_id=$2)",
+        )
+        .bind(community_id.as_uuid()).bind(channel_id)
+        .execute(tx.conn())
+        .await?;
+    }
     tx.commit().await?;
     Ok(result.rows_affected() > 0)
 }

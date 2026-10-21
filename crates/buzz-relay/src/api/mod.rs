@@ -696,4 +696,4 @@ mod parse_query_tests {
 }
 
 mod artifact;
-pub(crate) mod artifact_snapshot;
+pub(crate) mod artifact_sync;

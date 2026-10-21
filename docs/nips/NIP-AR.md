@@ -107,147 +107,128 @@ Clients validate content before interpreting it as a known type. Unknown types o
 
 Artifact text is untrusted. A type name, relationship tag, or payload cannot authorize a privileged action. Moving, deleting, or revoking access cannot erase copies already downloaded.
 
-## Stable manifest transport
+## Incremental sync
 
-The relay advertises `artifacts.snapshot.version = 1` in NIP-11. This
-extension uses signed `POST /query` requests. Each request contains one
-filter. It uses the same community and membership checks as other queries.
-The existing `current` and `history` responses keep their array format.
-
-Start a capture with:
-
-```json
-[{"artifact":"snapshot","action":"start","query":{"artifact":"current","#type":["buzz.task"]}}]
-```
-
-The query accepts current-state tag predicates. It does not accept `limit`
-or `offset`. The relay captures all matching current identities in one
-repeatable-read database transaction. Version 1 supports permanent channels only. A scope with a readable current
-artifact in a TTL channel fails before the relay publishes a token. An
-unrelated TTL chat does not block a task query. The relay never silently
-omits matching artifacts in TTL channels.
-Archive status remains client content.
-The capture includes archived tasks that match the query.
-
-Start and page responses have this form:
+The relay advertises `artifacts.sync` when incremental reads are enabled.
+Each signed `POST /query` request contains one filter. The query uses the
+same community, relay admission, channel access, and exact tag rules as an
+ordinary artifact read. The existing `current` and `history` array responses
+keep their format.
 
 ```json
-{"version":1,"token":"opaque","expiresAt":1792600000,"entries":[{"artifactId":"uuid","revisionId":"event-id","channelId":"uuid"}],"nextToken":"opaque-cursor"}
+[{"artifact":"sync","query":{"artifact":"current","#type":["buzz.task"]}}]
 ```
 
-`expiresAt` is an integer in epoch seconds. `token` remains constant for the
-capture. A token is bound to its reader, community, query, and capture
-generation. It grants no access by itself. The cursor names an immutable
-page position within that capture. A page request has this form:
+The initial read pages through current identities. A later read supplies the
+last completed `checkpoint`. A continuation supplies only `cursor`, with
+the same `query`. The server signs these opaque strings. They bind the
+community, reader, exact query, access-policy boundary, and database start
+time. The cursor also binds the last page position. Relay instances use the
+same configured signing identity, so another instance can serve a continuation.
+No server-side manifest or Redis allocation is required.
 
 ```json
-[{"artifact":"snapshot","action":"page","token":"opaque","cursor":"opaque-cursor"}]
+{
+  "version": 1,
+  "startedAt": "2026-10-21T12:00:00.123456Z",
+  "overlapSeconds": 120,
+  "changes": [
+    {"type":"upsert","artifactId":"22222222-2222-4222-8222-222222222222","event":{}},
+    {"type":"remove","artifactId":"33333333-3333-4333-8333-333333333333"},
+    {"type":"removeChannel","channelId":"44444444-4444-4444-8444-444444444444"}
+  ],
+  "nextCursor": null,
+  "checkpoint": "opaque"
+}
 ```
 
-Each response supplies the cursor for the next page. Repeating a cursor
-returns the same entries. A `null` `nextToken` marks the final page. The
-relay tracks the pages it serves. Completion fails if a page is skipped.
-A lost page response can be retried with the same cursor.
+`event` is the complete signed current revision. `remove` has one meaning:
+the requested artifact is unavailable for this query. It does not distinguish
+a missing identity, deletion, redaction, query exit, or denied access.
+`removeChannel` names a removed membership retained for this exact reader.
+It applies only to local rows whose current saved home is that channel.
+An earlier move upsert to another home therefore survives a later source
+channel removal.
 
-Fetch exact captured bodies with:
+Each pass fixes `startedAt` from the database clock. A later pass reads from
+the previous completed start time minus 120 seconds through its own start
+time, inclusive. New head writes, move-source records, and membership changes
+use database `clock_timestamp()`. The protocol assumes the delay from this
+stamp to commit visibility stays within the accepted 120-second overlap.
+That overlap is an operating assumption. It is not a measured upper bound.
+
+Pages order by `(change timestamp, source, stable identity)`. The source
+separates membership removals, head changes, grants, and move-source records.
+The identity breaks equal timestamp ties. It does not encode creation time.
+The time window and page position are stable. The current contents can change
+between requests. Replays must be idempotent. A later pass repairs changes
+that move beyond the current window.
+
+Only the final page returns a checkpoint. The client saves it after every
+page and local commit succeeds. A failed read keeps the prior checkpoint.
+Neither an initial read nor delta completion establishes absence. The client
+must not remove unseen rows. A fresh access grant replays older current
+heads from that channel. A move retains its source channel in the existing
+revision ledger, so a reader who cannot read the destination receives a
+current revalidation result without destination metadata.
+
+### Current reads and write confirmation
 
 ```json
-[{"artifact":"snapshot","action":"bodies","token":"opaque","revisionIds":["event-id"]}]
+[{"artifact":"sync","action":"current","query":{"artifact":"current","#type":["buzz.task"]},"artifactIds":["22222222-2222-4222-8222-222222222222"]}]
 ```
 
-The response is `{"version":1,"token":"opaque","events":[...]}`. It contains
-exactly the requested revision IDs. It never substitutes a newer revision.
-The client verifies each signature and its artifact, channel, and revision
-against the manifest. The client can reuse a verified body that it already
-has. Body durability is a client obligation. The relay does not keep body
-receipts.
+The response has `version`, database `startedAt`, and `changes`. It contains
+exactly one upsert or remove for each requested ID, in request order.
+The request permits 1–100 unique nonempty strings, each at most 256 UTF-8
+bytes. A string that is not a canonical artifact UUID returns remove.
+Duplicates and invalid bounds fail with `sync_invalid`. The server does not
+truncate the request.
 
-Validate the completion boundary with:
+Clients serialize a full delta pass and its commits before a current-ID read.
+Live revision pushes request a current-ID read; they do not replace confirmed
+rows directly. A current-ID read that starts after publication acceptance
+reads that commit or a later state on the writer. It can return a later head
+or remove. An empty delta does not confirm an accepted edit.
+
+### Access recovery and bounds
+
+Relevant channel access changes atomically advance one community policy
+stamp. They do not update it on ordinary artifact writes. A different stamp
+returns HTTP 409 `sync_reset` with `reason: "policy_changed"`, without naming
+private channels. A checkpoint older than 30 days returns the same code with
+`reason: "checkpoint_expired"`.
+
+Recovery runs a new initial read to discover current readable records and
+bounded current-ID reads for the IDs already saved locally. These reads
+revalidate known IDs without a channel roster or an absence scan. Save new
+progress only after discovery, revalidation, and local commits succeed.
+Preserve preferences when a record becomes unavailable.
+
+The server retains task heads, membership removal rows, and move-source
+ledger records. Removing this recovery history requires an explicit policy
+reset before a client can resume. Whole-community deletion closes admission
+and purges these rows through the existing deletion path.
+
+NIP-11 advertises:
 
 ```json
-[{"artifact":"snapshot","action":"complete","token":"opaque"}]
+{"version":1,"overlapSeconds":120,"pageRows":100,"currentRows":100,"responseBytes":8388608,"permanentChannelsOnly":true,"checkpointLifetimeSeconds":2592000}
 ```
 
-A valid response is `{"version":1,"token":"opaque","complete":true}`. Every request rechecks database authority. Manifest pages and completion
-validate the full frozen scope. A body read validates only the requested
-captured channels and revisions. A change in another captured channel can
-remain undetected until completion; it still prevents absence reconciliation. Access
-changes, a missing or redacted captured revision, and deletion or movement
-of a captured artifact require a reset. A delete followed by restore, or a
-move followed by a move back, still requires a reset. Ordinary post-capture
-updates leave the captured revision available. Channel row changes can
-conservatively require a reset, including metadata and TTL changes.
+Pages shrink to the response byte bound. A single oversized result returns
+HTTP 413 `sync_limit`. A current-ID batch can return that error; the client
+can split the batch. No page or batch silently truncates its result. The
+server permits four concurrent operations per process, a two-second SQL
+statement budget, and an eight-second operation budget. There is no
+identity-wide membership count limit on this path.
 
-The client starts its active live subscriptions before capture. Loss of the
-live socket prevents client completion. Server completion does not prove
-that every captured home has a live subscription. Periodic authoritative
-captures repair homes outside the active routes. It saves needed bodies before
-it reconciles absent identities. Completion alone does not permit deletion
-of local writes or live events received after capture. The client uses its
-local write boundary to preserve those records. If the live interval is
-lost, the client retains local records and starts a new capture. Live
-removal hints and periodic captures repair missed access and removal events.
-This extension has no durable global change log.
+Only matching readable artifacts in permanent channels are supported.
+A matching TTL artifact returns HTTP 422 `sync_unsupported_scope`. An
+unrelated TTL channel does not block task sync. HTTP 400 `sync_invalid`
+rejects invalid requests or tokens. HTTP 503 `sync_unavailable` reports a
+service or work-budget failure. These failures do not advance progress.
 
-### Limits and failures
-
-NIP-11 advertises these fields under `artifacts.snapshot`:
-
-| Field | Value |
-| --- | ---: |
-| `version` | 1 |
-| `maxRows` | 50000 |
-| `pageRows` | 1000 |
-| `pageBytes` | 262144 |
-| `bodyRows` | 100 |
-| `bodyBytes` | 8388608 |
-| `lifetimeSeconds` | 300 |
-| `permanentChannelsOnly` | true |
-
-A capture above the row or byte limit fails. It is never truncated.
-Capture, manifest pages, and completion have these independent admission limits:
-
-- The reader has at most 50,000 active channel memberships in the community. This count applies before query filters. Memberships in archived channels count while active.
-- The readable channel candidates contain at most 50,000 channels, before the artifact predicates apply.
-- The current artifact candidates contain at most 50,000 records, after the immutable type predicate and before other tag predicates.
-
-A reader above the membership limit receives HTTP 413 `snapshot_limit`, even
-if the query matches few or no artifacts. A narrower artifact query does not
-remove this membership limit. Version 1 does not support a reader with 60,000
-active memberships. A client route test at that size does not establish
-snapshot support.
-
-Each internal
-manifest is at most 16 MiB. Shared state is limited to 32 active
-captures and 64 MiB of charged snapshot storage. Each reader has at most two
-captures per community. Each process runs at most four snapshot operations
-at once. Each SQL statement has a two-second limit. Each operation has an
-eight-second elapsed limit. These limits include access checks.
-
-A bounded error response contains `error` and `code` with the same value:
-
-| HTTP status | Code | Client action |
-| --- | --- | --- |
-| 409 | `snapshot_reset` | Retain local records. Start a new capture with bounded backoff. |
-| 413 | `snapshot_limit` | Retain local records. Reduce a body batch or query scope where applicable. Never reconcile a partial capture as complete. |
-| 422 | `snapshot_unsupported_scope` | Retain local records. Use a scope that contains only permanent channels. |
-| 400 | `snapshot_invalid` | Correct the request. |
-| 503 | `snapshot_unavailable` | Retry with bounded backoff. Retain local records. |
-
-A single body above the byte limit fails explicitly. Admission and
-membership checks can also return their normal errors. All failures prevent
-absence reconciliation.
-
-Snapshot state uses the existing shared Redis store. It supports requests
-across relay processes without session affinity. The complete manifest is
-published atomically before its token is returned. The fixed expiry does
-not extend on reads. Redis expiry, eviction, or loss requires a reset. A
-Redis outage returns a service failure. The relay uses no memory fallback.
-One Redis hash holds manifests, direct body records, and quota charges.
-Eviction removes them together. Body reads fetch only the requested records.
-A serving write lease protects capture registration. Community deletion
-removes its records and quota charges.
-Each capture has a fixed logical expiry. A bounded allocation step removes
-expired captures. The hash expires when its last capture expires. A completed capture remains
-replayable until expiry and counts against the resource limits during that
-interval.
+The rollout gate is `BUZZ_ARTIFACT_SYNC_ENABLED`, off by default. Follow
+[artifact-sync-deployment.md](../artifact-sync-deployment.md) before enabling
+it. Sync completion does not establish a live subscription to every channel.

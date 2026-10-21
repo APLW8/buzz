@@ -82,6 +82,18 @@ pub(super) fn predicates(
         .push(")) AND (c.visibility='open' OR EXISTS (SELECT 1 FROM channel_members m WHERE m.community_id=c.community_id AND m.channel_id=c.id AND m.pubkey=")
         .push_bind(reader.to_vec()).push(" AND m.removed_at IS NULL)))");
     tag_predicates(qb, query);
+    if query.view == ArtifactView::Current {
+        for (_, values) in query.tags.iter().filter(|(name, _)| name == "d") {
+            qb.push(" AND a.artifact_id=ANY(")
+                .push_bind(
+                    values
+                        .iter()
+                        .filter_map(|id| id.parse::<uuid::Uuid>().ok())
+                        .collect::<Vec<_>>(),
+                )
+                .push(")");
+        }
+    }
 }
 
 /// Apply exact artifact tag predicates after access is resolved.

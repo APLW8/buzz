@@ -709,7 +709,7 @@ mod postgres_tests {
         let mut migrations: Vec<_> = MIGRATOR.iter().collect();
         migrations.sort_by_key(|migration| migration.version);
 
-        assert_eq!(migrations.len(), 68);
+        assert_eq!(migrations.len(), 70);
         assert_eq!(migrations[64].version, 65);
         let retire_ttl = strip_sql_comments(migrations[64].sql.as_str());
         for statement in [
@@ -2752,15 +2752,18 @@ mod postgres_tests {
             .await
             .expect("connect migrated probe database");
         MIGRATOR
-            .run_to(68, &migrated)
+            .run_to(70, &migrated)
             .await
-            .expect("apply migrations 1-68");
+            .expect("apply migrations 1-70");
 
         for table in [
             "relay_admin_actions",
             "relay_admin_outbox",
             "relay_operator_audit",
             "artifact_revisions",
+            "artifact_heads",
+            "channel_members",
+            "communities",
         ] {
             assert_eq!(
                 columns(&desired, table).await,

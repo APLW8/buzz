@@ -120,7 +120,7 @@ impl Fixture {
             .await
             .unwrap();
         let status = response.status();
-        let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        let bytes = axum::body::to_bytes(response.into_body(), 8 * 1024 * 1024)
             .await
             .unwrap();
         (status, serde_json::from_slice(&bytes).unwrap())
@@ -487,5 +487,5 @@ async fn generic_d_lookup_matches_before_limit() {
     assert_eq!(ids, expected, "{body}");
 }
 
-#[path = "artifact_postgres_tests/snapshot_postgres_tests.rs"]
-mod snapshot_postgres_tests;
+#[path = "artifact_postgres_tests/sync_postgres_tests.rs"]
+mod sync_postgres_tests;

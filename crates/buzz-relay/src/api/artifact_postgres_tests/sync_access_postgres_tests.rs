@@ -1,0 +1,254 @@
+use super::*;
+
+#[tokio::test]
+#[ignore = "requires Postgres"]
+async fn sync_redaction_and_query_exit_return_removals() {
+    let _guard = SERIAL.lock().await;
+    let f = fixture().await;
+    let id = Uuid::new_v4();
+    let first = f.revision(id, "create", None);
+    let first = EventBuilder::new(Kind::Custom(45010), first.content.clone())
+        .tags(
+            first
+                .tags
+                .iter()
+                .cloned()
+                .chain([Tag::parse(["project", "alpha"]).unwrap()]),
+        )
+        .sign_with_keys(&f.owner)
+        .unwrap();
+    accept(&f, &first).await;
+    let scope = json!({"artifact":"current","#type":["buzz.task"],"#project":["alpha"]});
+    let (_, page) = f
+        .request("/query", json!([{"artifact":"sync","query":scope}]))
+        .await;
+    assert_eq!(page["changes"][0]["type"], "upsert");
+    let changed = f.revision(id, "update", Some(&first));
+    accept(&f, &changed).await;
+    let (status, delta) = f
+        .request(
+            "/query",
+            json!([{"artifact":"sync","query":scope,"checkpoint":page["checkpoint"]}]),
+        )
+        .await;
+    assert!(status.is_success(), "{status}: {delta}");
+    assert_eq!(
+        delta["changes"],
+        json!([{ "type":"remove","artifactId":id }])
+    );
+    let before = sync(&f, None).await;
+    assert!(buzz_db::event::soft_delete_event_and_update_thread(
+        &f.pool,
+        f.community,
+        changed.id.as_bytes(),
+        None,
+        None
+    )
+    .await
+    .unwrap());
+    let after = sync(&f, Some(&before["checkpoint"])).await;
+    assert_eq!(
+        after["changes"],
+        json!([{ "type":"remove","artifactId":id }])
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires Postgres"]
+async fn sync_rejoin_replays_old_heads_without_resetting_on_task_edits() {
+    let _guard = SERIAL.lock().await;
+    let f = fixture().await;
+    let id = Uuid::new_v4();
+    let first = f.revision_as(&f.owner, f.private, id, "create", None);
+    accept(&f, &first).await;
+    sqlx::query("UPDATE artifact_heads SET modified_at='2000-01-01' WHERE community_id=$1")
+        .bind(f.community.as_uuid())
+        .execute(&f.pool)
+        .await
+        .unwrap();
+    buzz_db::channel_members::add_member(
+        &f.pool,
+        f.community,
+        f.private,
+        f.peer.public_key().as_bytes(),
+        buzz_db::channel_members::MemberRole::Member,
+        Some(f.owner.public_key().as_bytes()),
+    )
+    .await
+    .unwrap();
+    let (_, page) = f
+        .request_as(
+            &f.peer,
+            "/query",
+            json!([{"artifact":"sync","query":query()}]),
+        )
+        .await;
+    buzz_db::channel_members::remove_member(
+        &f.pool,
+        f.community,
+        f.private,
+        f.peer.public_key().as_bytes(),
+        f.owner.public_key().as_bytes(),
+    )
+    .await
+    .unwrap();
+    buzz_db::channel_members::add_member(
+        &f.pool,
+        f.community,
+        f.private,
+        f.peer.public_key().as_bytes(),
+        buzz_db::channel_members::MemberRole::Member,
+        Some(f.owner.public_key().as_bytes()),
+    )
+    .await
+    .unwrap();
+    let (status, delta) = f
+        .request_as(
+            &f.peer,
+            "/query",
+            json!([{"artifact":"sync","query":query(),"checkpoint":page["checkpoint"]}]),
+        )
+        .await;
+    assert!(status.is_success(), "{status}: {delta}");
+    assert_eq!(delta["changes"][0]["event"]["id"], first.id.to_hex());
+    let changed = f.revision_as(&f.owner, f.private, id, "update", Some(&first));
+    accept(&f, &changed).await;
+    let (status, delta) = f
+        .request_as(
+            &f.peer,
+            "/query",
+            json!([{"artifact":"sync","query":query(),"checkpoint":delta["checkpoint"]}]),
+        )
+        .await;
+    assert!(status.is_success(), "{status}: {delta}");
+    assert_eq!(delta["changes"][0]["event"]["id"], changed.id.to_hex());
+}
+
+#[tokio::test]
+#[ignore = "requires Postgres"]
+async fn sync_ignores_unrelated_ttl_and_unchanged_visibility() {
+    let _guard = SERIAL.lock().await;
+    let f = fixture().await;
+    accept(&f, &f.revision(Uuid::new_v4(), "create", None)).await;
+    let first = sync(&f, None).await;
+    buzz_db::channel::update_channel(
+        &f.pool,
+        f.community,
+        f.home,
+        buzz_db::channel::ChannelUpdate {
+            visibility: Some("open".into()),
+            name: Some("renamed".into()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    buzz_db::channel::update_channel(
+        &f.pool,
+        f.community,
+        f.private,
+        buzz_db::channel::ChannelUpdate {
+            ttl_seconds: Some(Some(3600)),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let next = sync(&f, Some(&first["checkpoint"])).await;
+    assert!(next["checkpoint"].is_string());
+    accept(
+        &f,
+        &f.revision_as(&f.owner, f.private, Uuid::new_v4(), "create", None),
+    )
+    .await;
+    let (status, body) = f
+        .request("/query", json!([{"artifact":"sync","query":query()}]))
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["code"], "sync_unsupported_scope");
+}
+
+#[tokio::test]
+#[ignore = "requires Postgres"]
+async fn sync_shrinks_large_pages_and_current_batches_fail_explicitly() {
+    let _guard = SERIAL.lock().await;
+    let f = fixture().await;
+    let mut ids = Vec::new();
+    for _ in 0..40 {
+        let id = Uuid::new_v4();
+        let base = f.revision(id, "create", None);
+        let event = EventBuilder::new(Kind::Custom(45010), "x".repeat(260_000))
+            .tags(base.tags.clone())
+            .sign_with_keys(&f.owner)
+            .unwrap();
+        accept(&f, &event).await;
+        ids.push(id);
+    }
+    let first = sync(&f, None).await;
+    assert_eq!(first["changes"].as_array().unwrap().len(), 20);
+    assert!(first["nextCursor"].is_string());
+    let (status, last) = f
+        .request(
+            "/query",
+            json!([{"artifact":"sync","query":query(),"cursor":first["nextCursor"]}]),
+        )
+        .await;
+    assert!(status.is_success(), "{status}: {last}");
+    assert_eq!(last["changes"].as_array().unwrap().len(), 20);
+    assert!(last["checkpoint"].is_string());
+    let (status, body) = f
+        .request(
+            "/query",
+            json!([{"artifact":"sync","action":"current","query":query(),"artifactIds":ids}]),
+        )
+        .await;
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(body["code"], "sync_limit");
+}
+
+#[tokio::test]
+#[ignore = "requires Postgres"]
+async fn sync_gate_controls_http_reads_and_capability() {
+    use tower::ServiceExt;
+    let _guard = SERIAL.lock().await;
+    let mut f = fixture().await;
+    for enabled in [false, true] {
+        Arc::make_mut(&mut Arc::make_mut(&mut f.state).config).artifact_sync_enabled = enabled;
+        let response = crate::router::build_router(f.state.clone())
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/info")
+                    .header("host", &f.host)
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(response.status().is_success());
+        let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let info: Value = serde_json::from_slice(&bytes).unwrap();
+        if enabled {
+            assert_eq!(
+                info["artifacts"]["sync"],
+                json!({"version":1,"overlapSeconds":120,
+                "pageRows":100,"currentRows":100,"responseBytes":8388608,
+                "permanentChannelsOnly":true,"checkpointLifetimeSeconds":2592000})
+            );
+        } else {
+            assert!(info["artifacts"].get("sync").is_none());
+        }
+        let (status, _) = f
+            .request("/query", json!([{"artifact":"sync","query":query()}]))
+            .await;
+        assert_eq!(
+            status,
+            if enabled {
+                StatusCode::OK
+            } else {
+                StatusCode::SERVICE_UNAVAILABLE
+            }
+        );
+    }
+}
