@@ -8,6 +8,24 @@ import XCTest
 
 class RunnerTests: XCTestCase {
 
+  func testBrowserAuthAcceptsConfiguredStagingAndRejectsUntrustedURLs() throws {
+    for host in ["app.builderlab.xyz", "app.builderlabstaging.xyz", "test.blockstaging.build"] {
+      let url = try XCTUnwrap(URL(string: "https://\(host)/api/goose/v1/auth/login?type=cli&product=buzz"))
+      XCTAssertTrue(isTrustedBuzzBrowserAuthURL(url), host)
+    }
+    for raw in [
+      "http://test.blockstaging.build/api/goose/v1/auth/login",
+      "https://test.blockstaging.build.attacker.test/api/goose/v1/auth/login",
+      "https://buzz.test.blockstaging.build/api/goose/v1/auth/login",
+      "https://test.blockstaging.build/other",
+      "https://user@test.blockstaging.build/api/goose/v1/auth/login",
+      "https://test.blockstaging.build:8443/api/goose/v1/auth/login",
+      "https://test.blockstaging.build/api/goose/v1/auth/login#fragment",
+    ] {
+      XCTAssertFalse(isTrustedBuzzBrowserAuthURL(try XCTUnwrap(URL(string: raw))), raw)
+    }
+  }
+
   @MainActor
   private func descendants(of view: UIView) -> [UIView] {
     view.subviews.flatMap { [$0] + descendants(of: $0) }

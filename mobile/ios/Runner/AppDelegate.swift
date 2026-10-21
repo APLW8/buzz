@@ -1126,6 +1126,14 @@ extension BuzzPushNavigationTarget {
 
 
 /// Keeps the authentication callback scoped to the system browser session.
+// Keep native login origins aligned with HostedEnvironment's trusted account origins.
+func isTrustedBuzzBrowserAuthURL(_ url: URL) -> Bool {
+  url.scheme == "https"
+    && ["app.builderlab.xyz", "app.builderlabstaging.xyz", "test.blockstaging.build"].contains(url.host ?? "")
+    && url.path == "/api/goose/v1/auth/login" && url.user == nil && url.password == nil
+    && url.port == nil && url.fragment == nil
+}
+
 private final class BuzzBrowserAuthBridge: NSObject, ASWebAuthenticationPresentationContextProviding {
   private let channel: FlutterMethodChannel
   private var session: ASWebAuthenticationSession?
@@ -1147,10 +1155,7 @@ private final class BuzzBrowserAuthBridge: NSObject, ASWebAuthenticationPresenta
       guard self.session == nil,
         let args = call.arguments as? [String: String],
         let raw = args["url"], let url = URL(string: raw),
-        url.scheme == "https",
-        ["app.builderlab.xyz", "app.builderlabstaging.xyz"].contains(url.host ?? ""),
-        url.path == "/api/goose/v1/auth/login", url.user == nil, url.password == nil,
-        url.port == nil, url.fragment == nil
+        isTrustedBuzzBrowserAuthURL(url)
       else { result(FlutterError(code: "unavailable", message: nil, details: nil)); return }
       self.pending = result
       let attemptID = UUID()
