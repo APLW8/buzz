@@ -72,6 +72,12 @@ fn build_launch_block_for_policy(
         if runtime.mcp_hooks {
             policy_env.insert("MCP_HOOK_SERVERS".into(), "*".into());
         }
+        // Remote launches do not pass through the desktop's local mesh preset.
+        // Give the bundled buzz-agent its existing bounded reply reminder here;
+        // launch.env is applied later, so an explicit user value of 0 wins.
+        if runtime.id == "buzz-agent" {
+            policy_env.insert("BUZZ_AGENT_REQUIRE_REPLY".into(), "1".into());
+        }
     }
     policy_env.insert("BUZZ_ACP_RELAY_OBSERVER".into(), "true".into());
     policy_env.insert("BUZZ_ACP_LAZY_POOL".into(), "true".into());
@@ -362,7 +368,30 @@ mod tests {
         assert_eq!(launch["policy_env"]["BUZZ_ACP_MAX_TURN_DURATION"], "23");
         assert_eq!(launch["policy_env"]["BUZZ_ACP_AGENTS"], "4");
         assert_eq!(launch["policy_env"]["BUZZ_ACP_SESSION_POLICY"], "channel");
+        assert!(launch["policy_env"]["BUZZ_AGENT_REQUIRE_REPLY"].is_null());
         assert_eq!(launch["owner_pubkey"], "owner-hex");
+    }
+
+    #[test]
+    fn remote_buzz_agent_enables_reply_guard_and_preserves_opt_out() {
+        let record = record();
+        let mut descriptor = EffectiveHarnessDescriptor {
+            command: "buzz-agent".into(),
+            args: vec![],
+            env: BTreeMap::new(),
+        };
+        let launch = build_launch_block(&record, &descriptor, &[], None, None, "owner-hex");
+
+        assert_eq!(launch["policy_env"]["BUZZ_AGENT_REQUIRE_REPLY"], "1");
+        assert!(launch["env"]["BUZZ_AGENT_REQUIRE_REPLY"].is_null());
+
+        descriptor
+            .env
+            .insert("BUZZ_AGENT_REQUIRE_REPLY".into(), "0".into());
+        let launch = build_launch_block(&record, &descriptor, &[], None, None, "owner-hex");
+
+        assert_eq!(launch["policy_env"]["BUZZ_AGENT_REQUIRE_REPLY"], "1");
+        assert_eq!(launch["env"]["BUZZ_AGENT_REQUIRE_REPLY"], "0");
     }
 
     #[test]
