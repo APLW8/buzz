@@ -576,7 +576,8 @@ async fn migration_schema_backfill_repairs_retained_restrictions_and_ignores_aud
 
 #[tokio::test]
 #[ignore = "requires Postgres"]
-async fn legacy_claim_lazily_revokes_history_after_a_fenced_community_reactivates() {
+async fn migration_schema_legacy_claim_lazily_revokes_history_after_a_fenced_community_reactivates()
+{
     let (pool, cases) = legacy_fixture().await;
     crate::migration::run_migrations(&pool).await.unwrap();
     run_invite_repair_script(&pool).await;
