@@ -24,6 +24,12 @@ use serde::Serialize;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+mod artifact_snapshots;
+#[cfg(test)]
+use artifact_snapshots::scan_proves_absence;
+pub use artifact_snapshots::{purge_artifact_snapshots, ARTIFACT_SNAPSHOT_STORE};
+use artifact_snapshots::{purge_redis_namespace, verify_redis_absence};
+
 /// Fleet-wide object cap for one observational taxonomy sweep.
 const DEFAULT_SWEEP_OBJECT_CAP: u64 = 10_000_000;
 /// Keys per frozen side-table chunk (one `DeleteObjects`-sized unit × 10).
@@ -1686,85 +1692,6 @@ async fn publish_disconnect_community(
         .query_async(&mut *connection)
         .await?;
     Ok(())
-}
-
-async fn purge_redis_namespace(
-    pool: &deadpool_redis::Pool,
-    community: buzz_core::CommunityId,
-) -> Result<u64> {
-    let mut connection = pool.get().await?;
-    let pattern = format!("buzz:{community}:*");
-    let mut cursor = 0u64;
-    let mut deleted = 0u64;
-    loop {
-        let (next, keys): (u64, Vec<String>) = redis::cmd("SCAN")
-            .arg(cursor)
-            .arg("MATCH")
-            .arg(&pattern)
-            .arg("COUNT")
-            .arg(1000)
-            .query_async(&mut *connection)
-            .await?;
-        if !keys.is_empty() {
-            let count: u64 = redis::cmd("UNLINK")
-                .arg(&keys)
-                .query_async(&mut *connection)
-                .await?;
-            deleted = deleted.saturating_add(count);
-        }
-        if next == 0 {
-            break;
-        }
-        cursor = next;
-    }
-    Ok(deleted)
-}
-
-fn scan_proves_absence(pages: &[(u64, Vec<String>)]) -> bool {
-    pages.last().is_some_and(|(cursor, _)| *cursor == 0)
-        && pages.iter().all(|(_, keys)| keys.is_empty())
-}
-
-async fn scan_redis_namespace(
-    connection: &mut deadpool_redis::Connection,
-    pattern: &str,
-) -> Result<Vec<(u64, Vec<String>)>> {
-    let mut cursor = 0u64;
-    let mut pages = Vec::new();
-    loop {
-        let page: (u64, Vec<String>) = redis::cmd("SCAN")
-            .arg(cursor)
-            .arg("MATCH")
-            .arg(pattern)
-            .arg("COUNT")
-            .arg(1000)
-            .query_async(&mut **connection)
-            .await?;
-        cursor = page.0;
-        pages.push(page);
-        if cursor == 0 {
-            return Ok(pages);
-        }
-    }
-}
-
-async fn verify_redis_absence(
-    pool: &deadpool_redis::Pool,
-    community: buzz_core::CommunityId,
-) -> Result<()> {
-    let mut connection = pool.get().await?;
-    let pattern = format!("buzz:{community}:*");
-    // SCAN is weakly consistent. Two complete empty passes ensure a cursor
-    // rollover or concurrent expiry cannot make one sparse pass look absent.
-    let first = scan_redis_namespace(&mut connection, &pattern).await?;
-    let second = scan_redis_namespace(&mut connection, &pattern).await?;
-    if scan_proves_absence(&first) && scan_proves_absence(&second) {
-        Ok(())
-    } else {
-        Err(transient(
-            "logical verification found a Redis namespace key",
-        ))
-    }
 }
 
 fn sweep_object_cap() -> u64 {

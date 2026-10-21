@@ -39,6 +39,58 @@ pub struct Manifest {
     active: Vec<String>,
 }
 
+/// One revision and its captured access scope for a bounded Redis body read.
+#[derive(Deserialize, Serialize)]
+pub struct BodyRecord {
+    entry: Entry,
+    revision: String,
+    policy: (Uuid, String, Option<String>),
+}
+
+impl Manifest {
+    /// Separate capture metadata from revision records for direct body lookup.
+    pub fn body_records(&self) -> Result<(Self, Vec<BodyRecord>)> {
+        let policies = self
+            .policy
+            .iter()
+            .map(|p| (p.0, p))
+            .collect::<std::collections::HashMap<_, _>>();
+        let records = self
+            .entries
+            .iter()
+            .zip(&self.revisions)
+            .map(|(entry, revision)| {
+                Ok(BodyRecord {
+                    entry: entry.clone(),
+                    revision: revision.clone(),
+                    policy: (*policies.get(&entry.channel_id).ok_or_else(|| {
+                        DbError::InvalidData("missing snapshot authority".into())
+                    })?)
+                    .clone(),
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let mut metadata = self.clone();
+        metadata.entries.clear();
+        metadata.revisions.clear();
+        metadata.policy.clear();
+        metadata.predicates.clear();
+        Ok((metadata, records))
+    }
+
+    /// Restore only requested records with the original capture boundary.
+    pub fn with_body_records(mut self, records: Vec<BodyRecord>) -> Self {
+        let mut policies = std::collections::BTreeMap::new();
+        for record in records {
+            self.entries.push(record.entry);
+            self.revisions.push(record.revision);
+            policies.insert(record.policy.0, record.policy);
+        }
+        self.policy = policies.into_values().collect();
+        self
+    }
+}
+
 async fn begin(db: &Db) -> Result<sqlx::Transaction<'static, sqlx::Postgres>> {
     let connection = crate::observability::acquire_writer(
         &db.pool,
@@ -417,9 +469,15 @@ impl Db {
              WHERE r.community_id=$1 AND r.artifact_id=ANY($2) \
              AND (age(r.xmin)<=age($3::text::xid) OR r.xmin::text=ANY($4)) \
              AND (e.id IS NULL OR e.deleted_at IS NOT NULL \
-             OR e.tags @> '[[\"op\",\"delete\"]]'::jsonb OR e.tags @> '[[\"op\",\"move\"]]'::jsonb))",
-        ).bind(community.as_uuid()).bind(&ids).bind(&manifest.xmax).bind(&manifest.active)
-            .fetch_one(&mut *tx).await?;
+             OR EXISTS(SELECT 1 FROM jsonb_array_elements(e.tags) tag \
+             WHERE tag->>0='op' AND tag->>1 IN ('delete','move'))))",
+        )
+        .bind(community.as_uuid())
+        .bind(&ids)
+        .bind(&manifest.xmax)
+        .bind(&manifest.active)
+        .fetch_one(&mut *tx)
+        .await?;
         if changed {
             return Err(DbError::ArtifactSnapshotReset);
         }

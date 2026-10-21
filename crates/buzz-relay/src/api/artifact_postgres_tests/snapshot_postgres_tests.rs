@@ -559,21 +559,9 @@ async fn artifact_snapshot_tokens_expiry_and_allocation_are_bounded() {
 }
 
 async fn cleanup(f: &Fixture) {
-    let mut conn = f.state.redis_pool.get().await.unwrap();
-    let prefix = format!("buzz:{{artifact-snapshots-v1}}:{}:", f.community.as_uuid());
-    let _: i64 = redis::Script::new(r#"
-        for _, field in ipairs(redis.call('HKEYS', KEYS[1])) do
-            if string.sub(field,1,7) == 'expiry:' then
-                local id = string.sub(field,8)
-                if string.sub(id,1,string.len(ARGV[1])) == ARGV[1] then
-                    local size = tonumber(redis.call('HGET',KEYS[1],'size:' .. id))
-                    redis.call('HINCRBY',KEYS[1],'total',-size)
-                    redis.call('HDEL',KEYS[1],field,'size:' .. id,'owner:' .. id,'data:' .. id,'progress:' .. id)
-                end
-            end
-        end
-        return 1
-    "#).key("buzz:{artifact-snapshots-v1}:store").arg(prefix).invoke_async(&mut *conn).await.unwrap();
+    buzz_deletion::purge_artifact_snapshots(&f.state.redis_pool, f.community)
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -613,4 +601,94 @@ async fn artifact_snapshot_new_matching_home_resets_then_a_fresh_capture_complet
         .await;
     assert!(status.is_success(), "{result}");
     cleanup(&f).await;
+}
+
+#[tokio::test]
+#[ignore = "requires Postgres"]
+async fn artifact_snapshot_deletion_removes_only_its_community_and_fences_capture() {
+    let f = Fixture::new().await;
+    let other = Fixture::new().await;
+    let event = f.revision(Uuid::new_v4(), "create", None);
+    f.publish(&event).await;
+    let start = json!([{"artifact":"snapshot","action":"start","query":{"artifact":"current"}}]);
+    let (status, captured) = f.request("/query", start.clone()).await;
+    assert!(status.is_success(), "{captured}");
+    let (status, retained) = other.request("/query", start.clone()).await;
+    assert!(status.is_success(), "{retained}");
+    let token = captured["token"].as_str().unwrap();
+    let snapshot_key = format!(
+        "buzz:{{artifact-snapshots-v1}}:{}:{}:{}",
+        f.community.as_uuid(),
+        f.owner.public_key().to_hex(),
+        token
+    );
+    let mut conn = f.state.redis_pool.get().await.unwrap();
+    let bytes_before: usize = redis::cmd("HGET")
+        .arg(buzz_deletion::ARTIFACT_SNAPSHOT_STORE)
+        .arg("total")
+        .query_async(&mut *conn)
+        .await
+        .unwrap();
+    let charge: usize = redis::cmd("HGET")
+        .arg(buzz_deletion::ARTIFACT_SNAPSHOT_STORE)
+        .arg(format!("size:{snapshot_key}"))
+        .query_async(&mut *conn)
+        .await
+        .unwrap();
+    let metadata: Vec<u8> = redis::cmd("HGET")
+        .arg(buzz_deletion::ARTIFACT_SNAPSHOT_STORE)
+        .arg(format!("meta:{snapshot_key}"))
+        .query_async(&mut *conn)
+        .await
+        .unwrap();
+    let metadata: Value = serde_json::from_slice(&metadata).unwrap();
+    assert_eq!(metadata["manifest"]["entries"], json!([]));
+    assert_eq!(metadata["manifest"]["policy"], json!([]));
+    let tenant = crate::tenant::bind_community(&f.state.db, &f.host)
+        .await
+        .unwrap();
+    let mut tx = f.pool.begin().await.unwrap();
+    sqlx::query("SELECT set_config('buzz.deletion_executor_community', $1, true), set_config('buzz.deletion_fence_generation', '0', true)")
+        .bind(f.community.as_uuid().to_string()).execute(&mut *tx).await.unwrap();
+    sqlx::query("UPDATE communities SET deletion_state='quiescing' WHERE id=$1")
+        .bind(f.community.as_uuid())
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    // An already-bound HTTP request must also fail at the external write seam.
+    let denied =
+        crate::api::artifact_snapshot::query(&f.state, &tenant, &f.owner.public_key(), &start[0])
+            .await;
+    assert_eq!(denied.unwrap_err().0, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        buzz_deletion::purge_artifact_snapshots(&f.state.redis_pool, f.community)
+            .await
+            .unwrap(),
+        1
+    );
+    let bytes_after: usize = redis::cmd("HGET")
+        .arg(buzz_deletion::ARTIFACT_SNAPSHOT_STORE)
+        .arg("total")
+        .query_async(&mut *conn)
+        .await
+        .unwrap();
+    assert_eq!(bytes_after, bytes_before - charge);
+    let fields: Vec<String> = redis::cmd("HKEYS")
+        .arg(buzz_deletion::ARTIFACT_SNAPSHOT_STORE)
+        .query_async(&mut *conn)
+        .await
+        .unwrap();
+    assert!(!fields.iter().any(|field| field.contains(&snapshot_key)));
+    let result = crate::api::artifact_snapshot::query(&f.state, &tenant, &f.owner.public_key(),
+        &json!({"artifact":"snapshot","action":"bodies","token":token,"revisionIds":[event.id.to_hex()]})).await;
+    assert_eq!(result.unwrap_err().0, StatusCode::CONFLICT);
+    let (status, completed) = other
+        .request(
+            "/query",
+            json!([{"artifact":"snapshot","action":"complete","token":retained["token"]}]),
+        )
+        .await;
+    assert!(status.is_success(), "{completed}");
+    cleanup(&other).await;
 }

@@ -657,7 +657,19 @@ async fn artifact_snapshot_keeps_captured_revisions_and_invalidates_removed_data
         f.db.capture_artifact_manifest(f.community, reader.as_bytes(), &query)
     };
     let manifest = capture().await.unwrap();
-    let newer = f.revision(d, "update", f.a, Some(&first), &f.owner, vec![]);
+    let newer = f.revision(
+        d,
+        "update",
+        f.a,
+        Some(&first),
+        &f.owner,
+        vec![vec![
+            "label".into(),
+            "op".into(),
+            "delete".into(),
+            "move".into(),
+        ]],
+    );
     f.accept(&newer, None).await;
     let second = f.revision(Uuid::new_v4(), "create", f.a, None, &f.owner, vec![]);
     f.accept(&second, None).await;

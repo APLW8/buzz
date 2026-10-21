@@ -208,7 +208,7 @@ A capture above the row or byte limit fails. It is never truncated. The relay in
 and current candidates per operation. The candidate limit applies after the
 immutable type predicate and before other tag predicates. Each internal
 manifest is at most 16 MiB. Shared state is limited to 32 active
-captures and 64 MiB of stored manifest bytes. Each reader has at most two
+captures and 64 MiB of charged snapshot storage. Each reader has at most two
 captures per community. Each process runs at most four snapshot operations
 at once. Each SQL statement has a two-second limit. Each operation has an
 eight-second elapsed limit. These limits include access checks.
@@ -232,7 +232,10 @@ across relay processes without session affinity. The complete manifest is
 published atomically before its token is returned. The fixed expiry does
 not extend on reads. Redis expiry, eviction, or loss requires a reset. A
 Redis outage returns a service failure. The relay uses no memory fallback.
-One Redis hash holds manifests and their accounting, so eviction removes both.
+One Redis hash holds manifests, direct body records, and quota charges.
+Eviction removes them together. Body reads fetch only the requested records.
+A serving write lease protects capture registration. Community deletion
+removes its records and quota charges.
 Each capture has a fixed logical expiry. A bounded allocation step removes
 expired captures. The hash expires when its last capture expires. A completed capture remains
 replayable until expiry and counts against the resource limits during that

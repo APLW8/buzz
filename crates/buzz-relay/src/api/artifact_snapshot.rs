@@ -2,7 +2,7 @@
 use crate::state::AppState;
 use axum::{http::StatusCode, Json};
 use buzz_core::{artifact::ArtifactView, TenantContext};
-use buzz_db::artifact_snapshot::{Manifest, MAX_BYTES, MAX_ROWS};
+use buzz_db::artifact_snapshot::{BodyRecord, Manifest, MAX_BYTES, MAX_ROWS};
 use deadpool_redis::redis;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -16,7 +16,7 @@ const BODY_ROWS: usize = 100;
 const BODY_BYTES: usize = 8_388_608;
 const GLOBAL_BYTES: usize = 64 * 1024 * 1024;
 const GLOBAL_COUNT: usize = 32;
-const STORE_KEY: &str = "buzz:{artifact-snapshots-v1}:store";
+const STORE_KEY: &str = buzz_deletion::ARTIFACT_SNAPSHOT_STORE;
 static WORK: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
 type Response = Result<Json<Value>, (StatusCode, Json<Value>)>;
 
@@ -145,6 +145,13 @@ async fn execute(
         .await
         .map_err(|_| unavailable())?;
     if let Request::Start { artifact, query } = request {
+        let serving_write = buzz_deletion::acquire_serving_write(
+            &state.db,
+            tenant.community(),
+            "artifact_snapshot",
+        )
+        .await
+        .map_err(|_| unavailable())?;
         if artifact != "snapshot" || query.get("limit").is_some() || query.get("offset").is_some() {
             return Err(invalid());
         }
@@ -176,18 +183,52 @@ async fn execute(
         let response = page(&snapshot, &token, 0)?;
         let snapshot_key = key(tenant, reader, &token);
         let principal_key = key(tenant, reader, "active");
-        let stored: i64 = redis::Script::new(REGISTER)
-            .key(STORE_KEY)
-            .arg(expires_at)
-            .arg(data.len())
-            .arg(GLOBAL_BYTES)
-            .arg(GLOBAL_COUNT)
-            .arg(data)
-            .arg(&snapshot_key)
-            .arg(principal_key)
-            .invoke_async(&mut *conn)
+        let (metadata, records) = snapshot
+            .manifest
+            .body_records()
+            .map_err(|e| db_error(e, tenant, reader))?;
+        let metadata = serde_json::to_vec(&Snapshot {
+            manifest: metadata,
+            query: Value::Null,
+            generation: token.clone(),
+            expires_at,
+            cursors: vec![],
+        })
+        .map_err(|_| unavailable())?;
+        let rows = records
+            .iter()
+            .zip(&snapshot.manifest.entries)
+            .map(|(record, entry)| {
+                Ok((
+                    entry.revision_id.clone(),
+                    serde_json::to_string(record).map_err(|_| unavailable())?,
+                ))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let rows = serde_json::to_vec(&rows).map_err(|_| unavailable())?;
+        // Charge duplicate records, field names, and Redis object overhead.
+        let stored_bytes = data.len() + metadata.len() + rows.len() + records.len() * 512;
+        let registration = async {
+            redis::Script::new(REGISTER)
+                .key(STORE_KEY)
+                .arg(expires_at)
+                .arg(stored_bytes)
+                .arg(GLOBAL_BYTES)
+                .arg(GLOBAL_COUNT)
+                .arg(data)
+                .arg(&snapshot_key)
+                .arg(principal_key)
+                .arg(metadata)
+                .arg(rows)
+                .invoke_async::<i64>(&mut *conn)
+                .await
+        };
+        let stored = serving_write
+            .protect(registration)
             .await
+            .map_err(|_| unavailable())?
             .map_err(|_| unavailable())?;
+        serving_write.finish().await.map_err(|_| unavailable())?;
         if stored == 0 {
             return Err(limit());
         }
@@ -207,19 +248,62 @@ async fn execute(
         return Err(invalid());
     }
     let snapshot_key = key(tenant, reader, token);
-    let data: Option<Vec<u8>> = redis::cmd("HGET")
-        .arg(STORE_KEY)
-        .arg(format!("data:{snapshot_key}"))
-        .query_async(&mut *conn)
-        .await
-        .map_err(|_| unavailable())?;
+    let body_ids = match &request {
+        Request::Bodies { revision_ids, .. } => {
+            if revision_ids.is_empty() {
+                return Err(invalid());
+            }
+            if revision_ids.len() > BODY_ROWS {
+                return Err(limit());
+            }
+            let mut seen = std::collections::HashSet::new();
+            if revision_ids
+                .iter()
+                .any(|id| buzz_core::artifact::event_id(id).is_err() || !seen.insert(id))
+            {
+                return Err(invalid());
+            }
+            Some(revision_ids)
+        }
+        _ => None,
+    };
+    let (data, body_rows) = if let Some(ids) = body_ids {
+        let mut fields = vec![format!("meta:{snapshot_key}")];
+        fields.extend(ids.iter().map(|id| format!("body:{snapshot_key}:{id}")));
+        let mut rows: Vec<Option<Vec<u8>>> = redis::cmd("HMGET")
+            .arg(STORE_KEY)
+            .arg(fields)
+            .query_async(&mut *conn)
+            .await
+            .map_err(|_| unavailable())?;
+        let data = rows.remove(0);
+        (data, rows)
+    } else {
+        let data: Option<Vec<u8>> = redis::cmd("HGET")
+            .arg(STORE_KEY)
+            .arg(format!("data:{snapshot_key}"))
+            .query_async(&mut *conn)
+            .await
+            .map_err(|_| unavailable())?;
+        (data, vec![])
+    };
     let data = data.ok_or_else(reset)?;
     if data.len() > MAX_BYTES {
         return Err(unavailable());
     }
-    let snapshot: Snapshot = serde_json::from_slice(&data).map_err(|_| unavailable())?;
+    let mut snapshot: Snapshot = serde_json::from_slice(&data).map_err(|_| unavailable())?;
     if snapshot.generation != *token || now >= snapshot.expires_at {
         return Err(reset());
+    }
+    if body_ids.is_some() {
+        let records = body_rows
+            .into_iter()
+            .map(|row| {
+                serde_json::from_slice::<BodyRecord>(&row.ok_or_else(invalid)?)
+                    .map_err(|_| unavailable())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        snapshot.manifest = snapshot.manifest.with_body_records(records);
     }
     let requested = match &request {
         Request::Bodies { revision_ids, .. } => {
@@ -320,25 +404,38 @@ async fn execute(
 const REGISTER: &str = r#"
 local now = tonumber(redis.call('TIME')[1])
 local count, principal, latest = 0, 0, tonumber(ARGV[1])
-for _, field in ipairs(redis.call('HKEYS', KEYS[1])) do
-    if string.sub(field, 1, 7) == 'expiry:' then
-        local id = string.sub(field, 8)
+local ids = cjson.decode(redis.call('HGET', KEYS[1], 'ids') or '[]')
+local retained = {}
+for _, id in ipairs(ids) do
+        local field = 'expiry:' .. id
         local expiry = tonumber(redis.call('HGET', KEYS[1], field))
         if expiry <= now then
             local size = tonumber(redis.call('HGET', KEYS[1], 'size:' .. id))
             redis.call('HINCRBY', KEYS[1], 'total', -size)
-            redis.call('HDEL', KEYS[1], field, 'size:' .. id, 'owner:' .. id, 'data:' .. id, 'progress:' .. id)
+            local rows = cjson.decode(redis.call('HGET', KEYS[1], 'rows:' .. id) or '[]')
+            for _, revision in ipairs(rows) do redis.call('HDEL', KEYS[1], 'body:' .. id .. ':' .. revision) end
+            redis.call('HDEL', KEYS[1], field, 'size:' .. id, 'owner:' .. id, 'data:' .. id, 'progress:' .. id, 'meta:' .. id, 'rows:' .. id)
         else
+            table.insert(retained, id)
             count = count + 1
             latest = math.max(latest, expiry)
             if redis.call('HGET', KEYS[1], 'owner:' .. id) == ARGV[7] then principal = principal + 1 end
         end
-    end
 end
+redis.call('HSET', KEYS[1], 'ids', cjson.encode(retained))
 if tonumber(ARGV[1]) <= now or count >= tonumber(ARGV[4]) or principal >= 2
     or tonumber(redis.call('HGET', KEYS[1], 'total') or '0') + tonumber(ARGV[2]) > tonumber(ARGV[3]) then return 0 end
 redis.call('HSET', KEYS[1], 'data:' .. ARGV[6], ARGV[5], 'progress:' .. ARGV[6], 1,
     'expiry:' .. ARGV[6], ARGV[1], 'size:' .. ARGV[6], ARGV[2], 'owner:' .. ARGV[6], ARGV[7])
+local rows = cjson.decode(ARGV[9] or '[]')
+local revisions = {}
+for _, row in ipairs(rows) do
+    redis.call('HSET', KEYS[1], 'body:' .. ARGV[6] .. ':' .. row[1], row[2])
+    table.insert(revisions, row[1])
+end
+redis.call('HSET', KEYS[1], 'meta:' .. ARGV[6], ARGV[8] or '', 'rows:' .. ARGV[6], cjson.encode(revisions))
+table.insert(retained, ARGV[6])
+redis.call('HSET', KEYS[1], 'ids', cjson.encode(retained))
 redis.call('HINCRBY', KEYS[1], 'total', ARGV[2])
 redis.call('EXPIREAT', KEYS[1], latest)
 return 1

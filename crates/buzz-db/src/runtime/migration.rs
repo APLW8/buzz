@@ -709,7 +709,7 @@ mod postgres_tests {
         let mut migrations: Vec<_> = MIGRATOR.iter().collect();
         migrations.sort_by_key(|migration| migration.version);
 
-        assert_eq!(migrations.len(), 66);
+        assert_eq!(migrations.len(), 67);
         assert_eq!(migrations[64].version, 65);
         let retire_ttl = strip_sql_comments(migrations[64].sql.as_str());
         for statement in [
@@ -2676,7 +2676,6 @@ mod postgres_tests {
             .await
             .expect("read index shapes")
         }
-
         let base_url = std::env::var("BUZZ_TEST_DATABASE_URL")
             .or_else(|_| std::env::var("DATABASE_URL"))
             .unwrap_or_else(|_| TEST_DB_URL.to_owned());
@@ -2748,14 +2747,15 @@ mod postgres_tests {
             .await
             .expect("connect migrated probe database");
         MIGRATOR
-            .run_to(55, &migrated)
+            .run_to(67, &migrated)
             .await
-            .expect("apply migrations 1-55");
+            .expect("apply migrations 1-67");
 
         for table in [
             "relay_admin_actions",
             "relay_admin_outbox",
             "relay_operator_audit",
+            "artifact_revisions",
         ] {
             assert_eq!(
                 columns(&desired, table).await,
