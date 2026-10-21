@@ -761,6 +761,11 @@ mod postgres_tests {
             .sql
             .as_str()
             .contains("ADD COLUMN through_message_id"));
+        assert_eq!(migrations[66].version, 67);
+        assert!(migrations[66]
+            .sql
+            .as_str()
+            .contains("ADD COLUMN join_role TEXT NOT NULL DEFAULT 'member'"));
         assert_eq!(migrations[48].version, 49);
         assert_eq!(migrations[49].version, 50);
         assert_eq!(migrations[50].version, 51);
