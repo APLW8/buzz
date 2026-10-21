@@ -53,8 +53,6 @@ pub fn verify_nip42_event(
         return Err(AuthError::InvalidSignature);
     }
 
-    buzz_core::verify_event(event).map_err(|_| AuthError::InvalidSignature)?;
-
     let challenge = event
         .tags
         .find(TagKind::Challenge)
@@ -64,6 +62,10 @@ pub fn verify_nip42_event(
     if challenge != expected_challenge {
         return Err(AuthError::ChallengeMismatch);
     }
+
+    // Reject proofs for another connection before hashing and Schnorr verification.
+    // Matching a challenge never replaces cryptographic verification.
+    buzz_core::verify_event(event).map_err(|_| AuthError::InvalidSignature)?;
 
     let relay = event
         .tags
