@@ -204,9 +204,20 @@ NIP-11 advertises these fields under `artifacts.snapshot`:
 | `lifetimeSeconds` | 300 |
 | `permanentChannelsOnly` | true |
 
-A capture above the row or byte limit fails. It is never truncated. The relay inspects at most 50,000 active memberships, readable channels,
-and current candidates per operation. The candidate limit applies after the
-immutable type predicate and before other tag predicates. Each internal
+A capture above the row or byte limit fails. It is never truncated.
+Capture, manifest pages, and completion have these independent admission limits:
+
+- The reader has at most 50,000 active channel memberships in the community. This count applies before query filters. Memberships in archived channels count while active.
+- The readable channel candidates contain at most 50,000 channels, before the artifact predicates apply.
+- The current artifact candidates contain at most 50,000 records, after the immutable type predicate and before other tag predicates.
+
+A reader above the membership limit receives HTTP 413 `snapshot_limit`, even
+if the query matches few or no artifacts. A narrower artifact query does not
+remove this membership limit. Version 1 does not support a reader with 60,000
+active memberships. A client route test at that size does not establish
+snapshot support.
+
+Each internal
 manifest is at most 16 MiB. Shared state is limited to 32 active
 captures and 64 MiB of charged snapshot storage. Each reader has at most two
 captures per community. Each process runs at most four snapshot operations
@@ -218,7 +229,7 @@ A bounded error response contains `error` and `code` with the same value:
 | HTTP status | Code | Client action |
 | --- | --- | --- |
 | 409 | `snapshot_reset` | Retain local records. Start a new capture with bounded backoff. |
-| 413 | `snapshot_limit` | Reduce a body batch or query scope. Never reconcile a partial capture as complete. |
+| 413 | `snapshot_limit` | Retain local records. Reduce a body batch or query scope where applicable. Never reconcile a partial capture as complete. |
 | 422 | `snapshot_unsupported_scope` | Retain local records. Use a scope that contains only permanent channels. |
 | 400 | `snapshot_invalid` | Correct the request. |
 | 503 | `snapshot_unavailable` | Retry with bounded backoff. Retain local records. |
