@@ -486,3 +486,6 @@ async fn generic_d_lookup_matches_before_limit() {
     expected.sort();
     assert_eq!(ids, expected, "{body}");
 }
+
+#[path = "artifact_postgres_tests/snapshot_postgres_tests.rs"]
+mod snapshot_postgres_tests;

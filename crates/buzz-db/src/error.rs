@@ -69,6 +69,18 @@ pub enum DbError {
     #[error("deletion safety error: {0}")]
     DeletionSafety(String),
 
+    /// An artifact snapshot exceeds its resource limit.
+    #[error("artifact snapshot limit exceeded")]
+    ArtifactSnapshotLimit,
+
+    /// Snapshot scope contains a channel with expiring content.
+    #[error("artifact snapshot scope requires permanent channels")]
+    ArtifactSnapshotUnsupportedScope,
+
+    /// Captured access or artifact data is no longer valid.
+    #[error("artifact snapshot must reset")]
+    ArtifactSnapshotReset,
+
     /// A complete read-state snapshot exceeds its bounded resource budget.
     #[error("read-state snapshot exceeds event or byte limit")]
     ReadStateSnapshotTooLarge,

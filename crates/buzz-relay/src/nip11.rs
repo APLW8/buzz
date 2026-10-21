@@ -283,6 +283,7 @@ impl RelayInfo {
                 "version": 1, "revision_kind": 45010, "removal_kind": 45011,
                 "query": "/query", "count": "/count",
                 "modes": ["current", "history"],
+                "snapshot": crate::api::artifact_snapshot::capability(),
                 "websocket_query_extensions": false,
                 "max_tags": buzz_core::artifact::MAX_TAGS,
                 "max_tag_name_bytes": buzz_core::artifact::MAX_TAG_NAME_BYTES,

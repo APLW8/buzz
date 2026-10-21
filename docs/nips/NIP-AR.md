@@ -106,3 +106,134 @@ Artifact revisions are state changes, not conversation messages. Receiving one M
 Clients validate content before interpreting it as a known type. Unknown types or malformed content render a safe fallback using the title, type, and home link. Editors MUST preserve unfamiliar fields and annotation tags or decline the edit. References may be unavailable or cyclic; clients must handle them safely without assuming relay validation.
 
 Artifact text is untrusted. A type name, relationship tag, or payload cannot authorize a privileged action. Moving, deleting, or revoking access cannot erase copies already downloaded.
+
+## Stable manifest transport
+
+The relay advertises `artifacts.snapshot.version = 1` in NIP-11. This
+extension uses signed `POST /query` requests. Each request contains one
+filter. It uses the same community and membership checks as other queries.
+The existing `current` and `history` responses keep their array format.
+
+Start a capture with:
+
+```json
+[{"artifact":"snapshot","action":"start","query":{"artifact":"current","#type":["buzz.task"]}}]
+```
+
+The query accepts current-state tag predicates. It does not accept `limit`
+or `offset`. The relay captures all matching current identities in one
+repeatable-read database transaction. Version 1 supports permanent channels only. A scope with a readable current
+artifact in a TTL channel fails before the relay publishes a token. An
+unrelated TTL chat does not block a task query. The relay never silently
+omits matching artifacts in TTL channels.
+Archive status remains client content.
+The capture includes archived tasks that match the query.
+
+Start and page responses have this form:
+
+```json
+{"version":1,"token":"opaque","expiresAt":1792600000,"entries":[{"artifactId":"uuid","revisionId":"event-id","channelId":"uuid"}],"nextToken":"opaque-cursor"}
+```
+
+`expiresAt` is an integer in epoch seconds. `token` remains constant for the
+capture. A token is bound to its reader, community, query, and capture
+generation. It grants no access by itself. The cursor names an immutable
+page position within that capture. A page request has this form:
+
+```json
+[{"artifact":"snapshot","action":"page","token":"opaque","cursor":"opaque-cursor"}]
+```
+
+Each response supplies the cursor for the next page. Repeating a cursor
+returns the same entries. A `null` `nextToken` marks the final page. The
+relay tracks the pages it serves. Completion fails if a page is skipped.
+A lost page response can be retried with the same cursor.
+
+Fetch exact captured bodies with:
+
+```json
+[{"artifact":"snapshot","action":"bodies","token":"opaque","revisionIds":["event-id"]}]
+```
+
+The response is `{"version":1,"token":"opaque","events":[...]}`. It contains
+exactly the requested revision IDs. It never substitutes a newer revision.
+The client verifies each signature and its artifact, channel, and revision
+against the manifest. The client can reuse a verified body that it already
+has. Body durability is a client obligation. The relay does not keep body
+receipts.
+
+Validate the completion boundary with:
+
+```json
+[{"artifact":"snapshot","action":"complete","token":"opaque"}]
+```
+
+A valid response is `{"version":1,"token":"opaque","complete":true}`. Every request rechecks database authority. Manifest pages and completion
+validate the full frozen scope. A body read validates only the requested
+captured channels and revisions. A change in another captured channel can
+remain undetected until completion; it still prevents absence reconciliation. Access
+changes, a missing or redacted captured revision, and deletion or movement
+of a captured artifact require a reset. A delete followed by restore, or a
+move followed by a move back, still requires a reset. Ordinary post-capture
+updates leave the captured revision available. Channel row changes can
+conservatively require a reset, including metadata and TTL changes.
+
+The client starts its active live subscriptions before capture. Loss of the
+live socket prevents client completion. Server completion does not prove
+that every captured home has a live subscription. Periodic authoritative
+captures repair homes outside the active routes. It saves needed bodies before
+it reconciles absent identities. Completion alone does not permit deletion
+of local writes or live events received after capture. The client uses its
+local write boundary to preserve those records. If the live interval is
+lost, the client retains local records and starts a new capture. Live
+removal hints and periodic captures repair missed access and removal events.
+This extension has no durable global change log.
+
+### Limits and failures
+
+NIP-11 advertises these fields under `artifacts.snapshot`:
+
+| Field | Value |
+| --- | ---: |
+| `version` | 1 |
+| `maxRows` | 50000 |
+| `pageRows` | 1000 |
+| `pageBytes` | 262144 |
+| `bodyRows` | 100 |
+| `bodyBytes` | 8388608 |
+| `lifetimeSeconds` | 300 |
+| `permanentChannelsOnly` | true |
+
+A capture above the row or byte limit fails. It is never truncated. The relay inspects at most 50,000 active memberships, readable channels,
+and current candidates per operation. The candidate limit applies after the
+immutable type predicate and before other tag predicates. Each internal
+manifest is at most 16 MiB. Shared state is limited to 32 active
+captures and 64 MiB of stored manifest bytes. Each reader has at most two
+captures per community. Each process runs at most four snapshot operations
+at once. Each SQL statement has a two-second limit. Each operation has an
+eight-second elapsed limit. These limits include access checks.
+
+A bounded error response contains `error` and `code` with the same value:
+
+| HTTP status | Code | Client action |
+| --- | --- | --- |
+| 409 | `snapshot_reset` | Retain local records. Start a new capture with bounded backoff. |
+| 413 | `snapshot_limit` | Reduce a body batch or query scope. Never reconcile a partial capture as complete. |
+| 422 | `snapshot_unsupported_scope` | Retain local records. Use a scope that contains only permanent channels. |
+| 400 | `snapshot_invalid` | Correct the request. |
+| 503 | `snapshot_unavailable` | Retry with bounded backoff. Retain local records. |
+
+A single body above the byte limit fails explicitly. Admission and
+membership checks can also return their normal errors. All failures prevent
+absence reconciliation.
+
+Snapshot state uses the existing shared Redis store. It supports requests
+across relay processes without session affinity. The complete manifest is
+published atomically before its token is returned. The fixed expiry does
+not extend on reads. Redis expiry, eviction, or loss requires a reset. A
+Redis outage returns a service failure. The relay uses no memory fallback.
+One Redis hash holds manifests and their accounting, so eviction removes both.
+Each capture has a fixed logical expiry. A bounded allocation step removes
+expired captures. The hash expires when its last capture expires. A completed capture remains
+replayable until expiry and counts against the resource limits during that
+interval.

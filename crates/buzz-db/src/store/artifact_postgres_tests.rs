@@ -643,3 +643,204 @@ async fn head_outside_authorized_channel_matches_missing_head() {
         ArtifactOutcome::Accepted(_)
     ));
 }
+
+#[tokio::test]
+#[ignore = "requires Postgres"]
+async fn artifact_snapshot_keeps_captured_revisions_and_invalidates_removed_data() {
+    let f = Fixture::new().await;
+    let d = Uuid::new_v4();
+    let first = f.revision(d, "create", f.a, None, &f.owner, vec![]);
+    f.accept(&first, None).await;
+    let query = artifact::parse_query(&serde_json::json!({"artifact":"current"})).unwrap();
+    let reader = f.owner.public_key();
+    let capture = || {
+        f.db.capture_artifact_manifest(f.community, reader.as_bytes(), &query)
+    };
+    let manifest = capture().await.unwrap();
+    let newer = f.revision(d, "update", f.a, Some(&first), &f.owner, vec![]);
+    f.accept(&newer, None).await;
+    let second = f.revision(Uuid::new_v4(), "create", f.a, None, &f.owner, vec![]);
+    f.accept(&second, None).await;
+    let old =
+        f.db.read_artifact_manifest(
+            f.community,
+            f.owner.public_key().as_bytes(),
+            &manifest,
+            &[first.id.to_hex()],
+            8_388_608,
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        f.db.read_artifact_manifest(
+            f.community,
+            reader.as_bytes(),
+            &manifest,
+            &[first.id.to_hex()],
+            1
+        )
+        .await,
+        Err(crate::DbError::ArtifactSnapshotLimit)
+    ));
+    assert_eq!(old[0].event.id, first.id);
+    assert_eq!(manifest.entries.len(), 1);
+
+    // A delete and restore cannot make an invalid capture valid again.
+    let deleted = f.revision(d, "delete", f.a, Some(&newer), &f.owner, vec![]);
+    f.accept(&deleted, None).await;
+    let restored = f.revision(d, "restore", f.a, Some(&deleted), &f.owner, vec![]);
+    f.accept(&restored, None).await;
+    assert!(matches!(
+        f.db.read_artifact_manifest(
+            f.community,
+            f.owner.public_key().as_bytes(),
+            &manifest,
+            &[],
+            0
+        )
+        .await,
+        Err(crate::DbError::ArtifactSnapshotReset)
+    ));
+
+    let manifest = capture().await.unwrap();
+    sqlx::query("UPDATE events SET deleted_at=now() WHERE community_id=$1 AND id=$2")
+        .bind(f.community.as_uuid())
+        .bind(restored.id.as_bytes().as_slice())
+        .execute(&f.db.pool)
+        .await
+        .unwrap();
+    assert!(matches!(
+        f.db.read_artifact_manifest(
+            f.community,
+            f.owner.public_key().as_bytes(),
+            &manifest,
+            &[],
+            0
+        )
+        .await,
+        Err(crate::DbError::ArtifactSnapshotReset)
+    ));
+    sqlx::query("UPDATE events SET deleted_at=NULL WHERE community_id=$1 AND id=$2")
+        .bind(f.community.as_uuid())
+        .bind(restored.id.as_bytes().as_slice())
+        .execute(&f.db.pool)
+        .await
+        .unwrap();
+    assert!(matches!(
+        f.db.read_artifact_manifest(
+            f.community,
+            f.owner.public_key().as_bytes(),
+            &manifest,
+            &[],
+            0
+        )
+        .await,
+        Err(crate::DbError::ArtifactSnapshotReset)
+    ));
+
+    let manifest = capture().await.unwrap();
+    sqlx::query("UPDATE channel_members SET removed_at=now() WHERE community_id=$1 AND pubkey=$2")
+        .bind(f.community.as_uuid())
+        .bind(f.owner.public_key().as_bytes().as_slice())
+        .execute(&f.db.pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE channel_members SET removed_at=NULL WHERE community_id=$1 AND pubkey=$2")
+        .bind(f.community.as_uuid())
+        .bind(f.owner.public_key().as_bytes().as_slice())
+        .execute(&f.db.pool)
+        .await
+        .unwrap();
+    assert!(matches!(
+        f.db.read_artifact_manifest(
+            f.community,
+            f.owner.public_key().as_bytes(),
+            &manifest,
+            &[],
+            0
+        )
+        .await,
+        Err(crate::DbError::ArtifactSnapshotReset)
+    ));
+
+    let manifest = capture().await.unwrap();
+    let moved = f.revision(d, "move", f.b, Some(&restored), &f.owner, vec![]);
+    f.accept(&moved, Some(f.a)).await;
+    let back = f.revision(d, "move", f.a, Some(&moved), &f.owner, vec![]);
+    f.accept(&back, Some(f.b)).await;
+    assert!(matches!(
+        f.db.read_artifact_manifest(
+            f.community,
+            f.owner.public_key().as_bytes(),
+            &manifest,
+            &[],
+            0
+        )
+        .await,
+        Err(crate::DbError::ArtifactSnapshotReset)
+    ));
+}
+
+#[tokio::test]
+#[ignore = "requires Postgres"]
+async fn artifact_snapshot_fences_a_delete_transaction_in_progress_at_capture() {
+    let f = Fixture::new().await;
+    let id = Uuid::new_v4();
+    let first = f.revision(id, "create", f.a, None, &f.owner, vec![]);
+    f.accept(&first, None).await;
+    let deleted = f.revision(id, "delete", f.a, Some(&first), &f.owner, vec![]);
+    let mut tx =
+        f.db.begin_event_write_transaction(f.community)
+            .await
+            .unwrap();
+    sqlx::query(
+        "INSERT INTO artifact_revisions(community_id,event_id,artifact_id) VALUES($1,$2,$3)",
+    )
+    .bind(f.community.as_uuid())
+    .bind(deleted.id.as_bytes().as_slice())
+    .bind(id)
+    .execute(tx.conn())
+    .await
+    .unwrap();
+    crate::event::insert_event_in_transaction(&mut tx, &deleted, Some(f.a))
+        .await
+        .unwrap();
+    sqlx::query("UPDATE artifact_heads SET event_id=$3,deleted=true WHERE community_id=$1 AND artifact_id=$2")
+        .bind(f.community.as_uuid()).bind(id).bind(deleted.id.as_bytes().as_slice()).execute(tx.conn()).await.unwrap();
+    let query = artifact::parse_query(&serde_json::json!({"artifact":"current"})).unwrap();
+    let manifest =
+        f.db.capture_artifact_manifest(f.community, f.owner.public_key().as_bytes(), &query)
+            .await
+            .unwrap();
+    tx.commit().await.unwrap();
+    let restored = f.revision(id, "restore", f.a, Some(&deleted), &f.owner, vec![]);
+    f.accept(&restored, None).await;
+    assert!(matches!(
+        f.db.read_artifact_manifest(
+            f.community,
+            f.owner.public_key().as_bytes(),
+            &manifest,
+            &[],
+            0
+        )
+        .await,
+        Err(crate::DbError::ArtifactSnapshotReset)
+    ));
+}
+
+#[tokio::test]
+#[ignore = "requires Postgres"]
+async fn artifact_snapshot_bounds_current_candidates_before_reading_payloads() {
+    let f = Fixture::new().await;
+    sqlx::query("INSERT INTO artifact_heads(community_id,artifact_id,event_id,channel_id,artifact_type) \
+        SELECT $1,gen_random_uuid(),digest(n::text,'sha256'),$2,'buzz.task' FROM generate_series(1,50001) n")
+        .bind(f.community.as_uuid()).bind(f.a).execute(&f.db.pool).await.unwrap();
+    let query =
+        artifact::parse_query(&serde_json::json!({"artifact":"current","#type":["buzz.task"]}))
+            .unwrap();
+    assert!(matches!(
+        f.db.capture_artifact_manifest(f.community, f.owner.public_key().as_bytes(), &query)
+            .await,
+        Err(crate::DbError::ArtifactSnapshotLimit)
+    ));
+}

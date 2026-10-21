@@ -77,6 +77,8 @@ pub mod workflow;
 pub mod artifact;
 
 mod artifact_query;
+/// Stable artifact manifests and current access validation.
+pub mod artifact_snapshot;
 
 #[cfg(test)]
 mod artifact_postgres_tests;
