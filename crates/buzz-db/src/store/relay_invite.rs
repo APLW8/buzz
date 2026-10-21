@@ -241,8 +241,9 @@ pub(crate) async fn principal_restricted(
 }
 
 /// Whether a restriction row permanently revokes an invite from this principal.
-/// Legacy invites treat every retained row as history; new invites only treat
-/// a currently active ban as permanent revocation.
+/// Unrepaired legacy rows treat every retained restriction as history; the
+/// maintenance repair clears that marker after its historical decision. New
+/// and repaired rows only treat a currently active ban as permanent revocation.
 async fn has_revoking_restriction(
     tx: &mut sqlx::PgConnection,
     community: CommunityId,

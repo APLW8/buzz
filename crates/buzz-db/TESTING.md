@@ -64,5 +64,6 @@ The runner creates one desired-state source database per invocation and clones
 it for ordinary tests. Migration-mode tests start empty. Cleanup retries
 transient disconnect races before reporting a warning.
 
-Invite migration-upgrade tests also execute the operator repair script with
-`psql`; make sure the PostgreSQL client is installed and resolves on `PATH`.
+Invite upgrade tests start from the complete schema through migration 0066 and
+exercise both migration and desired-state paths against populated data. The
+historical repair is validated separately from the application/schema change.

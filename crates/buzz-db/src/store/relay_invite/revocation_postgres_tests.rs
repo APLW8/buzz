@@ -317,7 +317,6 @@ async fn stalled_production_mint_ignores_lifted_history_and_later_audit_touches(
         .unwrap();
     }
 
-    super::upgrade_postgres_tests::run_invite_repair_script(&pool).await;
     let revoked: Option<chrono::DateTime<chrono::Utc>> =
         sqlx::query_scalar("SELECT revoked_at FROM relay_invites WHERE community_id=$1 AND id=$2")
             .bind(community.as_uuid())
@@ -345,7 +344,7 @@ async fn stalled_production_mint_ignores_lifted_history_and_later_audit_touches(
 
 #[tokio::test]
 #[ignore = "requires Postgres"]
-async fn historical_backfill_still_revokes_new_protocol_rows_for_active_bans() {
+async fn active_ban_lazily_revokes_new_protocol_rows() {
     let (pool, community, issuer, claimant) = fixture().await;
     let invite = mint_relay_invite(&pool, community, &issuer, 3600, None)
         .await
@@ -370,19 +369,6 @@ async fn historical_backfill_still_revokes_new_protocol_rows_for_active_bans() {
     .await
     .unwrap();
 
-    super::upgrade_postgres_tests::run_invite_repair_script(&pool).await;
-    let revoked: bool = sqlx::query_scalar(
-        "SELECT revoked_at IS NOT NULL FROM relay_invites WHERE community_id=$1 AND id=$2",
-    )
-    .bind(community.as_uuid())
-    .bind(invite.invite_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    assert!(
-        revoked,
-        "active restriction repair applies to new-protocol rows"
-    );
     assert_eq!(
         claim_relay_invite_outcome(
             &pool,
@@ -395,6 +381,15 @@ async fn historical_backfill_still_revokes_new_protocol_rows_for_active_bans() {
         .unwrap(),
         ClaimOutcome::Revoked
     );
+    let revoked: bool = sqlx::query_scalar(
+        "SELECT revoked_at IS NOT NULL FROM relay_invites WHERE community_id=$1 AND id=$2",
+    )
+    .bind(community.as_uuid())
+    .bind(invite.invite_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(revoked, "active bans durably revoke new-protocol rows");
 }
 
 #[tokio::test]

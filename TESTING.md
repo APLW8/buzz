@@ -151,12 +151,14 @@ the same machine.
 New invitations are durable v2 bearers. A community ban permanently revokes
 outstanding v2 invitations issued by that principal or its recorded agents.
 Unban does not restore them; an unrestricted issuer can mint new invitations.
-Existing durable rows default to legacy admission. Historical repair revokes a
-legacy row when any retained `community_bans` row exists for its canonical
-issuer or currently recorded owner, regardless of whether the restriction is
-active or whether the invite was created before it. New mints explicitly mark
-their rows as protocol-native; active bans still revoke those rows. Audit and
-action records alone do not establish enforcement.
+Existing durable rows default to legacy admission. Until the separately
+reviewed historical repair processes them, any retained `community_bans` row
+for a canonical issuer or its currently recorded owner permanently revokes a
+legacy row, including expired, lifted, and timeout-only restrictions. The
+repair clears that legacy marker after deciding the row's historical state.
+Afterward, only an active ban permanently revokes it; timeouts and mutes block
+claims only while active. New mints explicitly mark their rows as protocol
+native. Audit and action records alone do not establish enforcement.
 An issuer or verified owner timeout also blocks claims on existing invitations
 while it lasts, without durable revocation. Claims resume after timeout expiry.
 Claim credentials are verified without user writes. Successful claims commit
@@ -185,21 +187,14 @@ This change does not choose or deploy a cutoff.
 Migration 0067 is an expand step: it adds `revoked_at` and
 `legacy_admission`, and does not rewrite existing invite rows. Before applying
 it, reconcile any previously applied invitation migration version with the
-schema and migration history. For the rollout, pause invitation minting and
-claiming and ban lifts; apply migration 0067; deploy the new relay and drain all
-old writers; then run the fenced historical repair while admission remains
-paused:
-
-```bash
-psql -X -v ON_ERROR_STOP=1 -f scripts/maintenance/backfill_invite_revocations.sql
-```
-
-Resume minting, claiming, and ban lifts only after the script reports zero
-unrepaired invites and only new relay code is serving. The repair is bounded
-and idempotent; rerun it after interruption before reopening admission. A
-community outside the active state is skipped and remains fenced. A rollback
-to code that ignores `revoked_at` also requires invitation admission to remain
-paused. Legacy owner attribution uses the agent's currently recorded
+schema and migration history. Pause invitation minting and claiming and ban
+lifts; apply migration 0067; deploy the new relay and drain all old writers;
+then keep admission paused until the separately reviewed, fenced historical
+repair completes. Resume only after it reports zero unrepaired invites and
+only new relay code is serving. The repair processes active communities and
+leaves a skipped community's legacy markers in place until it can be repaired.
+A rollback to code that ignores `revoked_at` also requires invitation admission
+to remain paused. Legacy owner attribution uses the agent's currently recorded
 `agent_owner_pubkey`; deleting an owner user row out of band clears that link
 through its foreign key, so a later repair cannot recover the former
 relationship. Reconcile before any external user-row cleanup that could erase

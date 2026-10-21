@@ -741,20 +741,7 @@ mod postgres_tests {
             .to_ascii_uppercase()
             .contains("CREATE FUNCTION"));
         assert!(!desired_schema.contains("invite_admission_lock"));
-        assert!(!desired_schema.contains("backfill_invite_revocations"));
 
-        let invite_repair =
-            include_str!("../../../../scripts/maintenance/backfill_invite_revocations.sql");
-        assert!(invite_repair.contains("pg_advisory_xact_lock_shared"));
-        assert!(invite_repair.contains("'invite-admission:'"));
-        assert!(invite_repair.contains("deletion_state = 'active' AND deleted_at IS NULL"));
-        assert!(invite_repair.contains("LIMIT 500"));
-        assert!(invite_repair.contains("FOR UPDATE OF invite"));
-        assert!(invite_repair.contains("COMMIT;"));
-        assert!(invite_repair.contains("SELECT count(*) AS unrepaired_invites"));
-        assert!(!invite_repair
-            .to_ascii_uppercase()
-            .contains("CREATE FUNCTION"));
         assert_eq!(migrations[58].version, 59);
         assert!(migrations[58].sql.as_str().contains("buzz.push_enabled"));
         assert_eq!(migrations[59].version, 60);

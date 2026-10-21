@@ -4,7 +4,6 @@ use uuid::Uuid;
 
 struct LegacyInviteCase {
     community: Uuid,
-    revoked: bool,
 }
 
 struct RelayAdminActionFixture<'a> {
@@ -335,68 +334,19 @@ async fn legacy_fixture() -> (PgPool, Vec<LegacyInviteCase>) {
             set_deletion_state(&pool, community, "tombstone").await;
         }
 
-        cases.push(LegacyInviteCase {
-            community,
-            // The maintenance repair must not write through a deletion fence.
-            revoked: index < 8 && !matches!(index, 1 | 2),
-        });
+        cases.push(LegacyInviteCase { community });
     }
     (pool, cases)
 }
 
-pub(super) async fn run_invite_repair_script(pool: &PgPool) -> String {
-    let database_url = crate::test_support::database_url();
-    let options: sqlx::postgres::PgConnectOptions = database_url.parse().unwrap();
-    let host = options.get_host().to_owned();
-    let port = options.get_port().to_string();
-    let user = options.get_username().to_owned();
-    let password = database_url
-        .split_once("://")
-        .and_then(|(_, rest)| rest.split_once('@'))
-        .and_then(|(authority, _)| authority.split_once(':'))
-        .map(|(_, password)| password.to_owned())
-        .or_else(|| std::env::var("PGPASSWORD").ok())
-        .unwrap_or_default();
-    let database: String = sqlx::query_scalar("SELECT current_database()")
-        .fetch_one(pool)
-        .await
-        .unwrap();
-    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../scripts/maintenance/backfill_invite_revocations.sql");
-    let output = std::process::Command::new("psql")
-        .args(["-X", "-v", "ON_ERROR_STOP=1"])
-        .arg("--host")
-        .arg(host)
-        .arg("--port")
-        .arg(port)
-        .arg("--username")
-        .arg(user)
-        .arg("--dbname")
-        .arg(database)
-        .arg("--file")
-        .arg(script)
-        .env("PGPASSWORD", password)
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "invite repair script failed:\n{}\n{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr),
-    );
-    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-    assert!(
-        stdout.lines().any(|line| line.trim() == "0"),
-        "repair validation did not return zero unrepaired invites:\n{stdout}"
-    );
-    stdout
-}
-
-async fn invite_revocation_state(pool: &PgPool) -> Vec<(Uuid, Option<DateTime<Utc>>)> {
-    sqlx::query_as("SELECT community_id, revoked_at FROM relay_invites ORDER BY community_id")
-        .fetch_all(pool)
-        .await
-        .unwrap()
+async fn invite_revocation_state(pool: &PgPool) -> Vec<(Uuid, Option<DateTime<Utc>>, bool)> {
+    sqlx::query_as(
+        "SELECT community_id, revoked_at, legacy_admission \
+         FROM relay_invites ORDER BY community_id",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap()
 }
 
 async fn assert_admission_column(pool: &PgPool) {
@@ -428,55 +378,14 @@ async fn assert_admission_column(pool: &PgPool) {
     );
 }
 
-async fn assert_repaired_and_fenced(pool: &PgPool, cases: &[LegacyInviteCase]) {
-    assert_admission_column(pool).await;
-    for case in cases {
-        let (revoked, legacy): (bool, bool) = sqlx::query_as(
-            "SELECT revoked_at IS NOT NULL, legacy_admission \
-             FROM relay_invites WHERE community_id = $1",
-        )
-        .bind(case.community)
-        .fetch_one(pool)
-        .await
-        .unwrap();
-        assert_eq!(revoked, case.revoked, "tenant {}", case.community);
-        assert!(legacy, "old-code inserts retain the legacy default");
-    }
-    let unfenced_error =
-        sqlx::query("UPDATE relay_invites SET use_count = use_count + 1 WHERE community_id = $1")
-            .bind(cases[1].community)
-            .execute(pool)
-            .await
-            .unwrap_err();
-    assert!(
-        unfenced_error
-            .to_string()
-            .contains("community write fenced"),
-        "{unfenced_error}"
-    );
-    let invitation_triggers: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM pg_trigger WHERE NOT tgisinternal \
-         AND tgname IN ('invite_restriction_lock', 'invite_issuer_revocation', \
-                        'invite_owner_lock', 'invite_owner_revocation', \
-                        'community_write_fence_relay_invites')",
-    )
-    .fetch_one(pool)
-    .await
-    .unwrap();
-    assert_eq!(
-        invitation_triggers, 1,
-        "only the community deletion fence remains"
-    );
-}
-
 async fn apply_pgschema_to_existing_database(pool: &PgPool) {
     // The pinned migration history has retired triggers on the partitioned
     // events parent and auto-named deletion-request checks that the desired
     // schema replaces. pgschema orders child-trigger drops before their parent
     // and schedules a replacement check before dropping its same-named copy.
     // Remove only those stale objects in this disposable fixture; pgschema
-    // still applies desired state; the historical repair remains a separate
-    // operator script required after deployment.
+    // still applies desired state; historical repair is a separate reviewed
+    // operation after deployment.
     sqlx::raw_sql(
         "DROP TRIGGER IF EXISTS trg_events_guard_nip_rs_hard_delete ON events; \
          DROP TRIGGER IF EXISTS trg_events_nip_rs_watermark ON events; \
@@ -553,7 +462,7 @@ async fn apply_pgschema_to_existing_database(pool: &PgPool) {
 
 #[tokio::test]
 #[ignore = "requires Postgres"]
-async fn migration_schema_backfill_repairs_retained_restrictions_and_ignores_audit_only_history() {
+async fn migration_schema_0067_adds_invite_columns_without_rewriting_history() {
     let (pool, cases) = legacy_fixture().await;
     crate::migration::run_migrations(&pool).await.unwrap();
     assert_admission_column(&pool).await;
@@ -567,11 +476,35 @@ async fn migration_schema_backfill_repairs_retained_restrictions_and_ignores_aud
         0,
         "schema migration must not rewrite historical rows"
     );
-    run_invite_repair_script(&pool).await;
-    let repaired = invite_revocation_state(&pool).await;
-    assert_repaired_and_fenced(&pool, &cases).await;
-    run_invite_repair_script(&pool).await;
-    assert_eq!(invite_revocation_state(&pool).await, repaired);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM relay_invites WHERE legacy_admission IS DISTINCT FROM true"
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
+        0,
+        "pre-migration rows remain legacy-admitted"
+    );
+
+    insert_legacy_invite(
+        &pool,
+        cases[8].community,
+        100,
+        &hex::encode([1u8; 32]),
+        Utc::now(),
+    )
+    .await;
+    let old_code_insert_default: bool = sqlx::query_scalar(
+        "SELECT legacy_admission FROM relay_invites \
+         WHERE community_id=$1 AND token_hash=$2",
+    )
+    .bind(cases[8].community)
+    .bind([100u8; 32].as_slice())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(old_code_insert_default);
 }
 
 #[tokio::test]
@@ -580,7 +513,6 @@ async fn migration_schema_legacy_claim_lazily_revokes_history_after_a_fenced_com
 {
     let (pool, cases) = legacy_fixture().await;
     crate::migration::run_migrations(&pool).await.unwrap();
-    run_invite_repair_script(&pool).await;
 
     let community = cases[1].community;
     let token_hash = [2u8; 32];
@@ -633,6 +565,16 @@ async fn migration_schema_legacy_claim_lazily_revokes_history_after_a_fenced_com
         revoked,
         "reactivated legacy history is durably revoked on claim"
     );
+    let legacy_admission: bool =
+        sqlx::query_scalar("SELECT legacy_admission FROM relay_invites WHERE community_id = $1")
+            .bind(community)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(
+        legacy_admission,
+        "claim does not stand in for maintenance repair"
+    );
 }
 
 #[tokio::test]
@@ -663,15 +605,18 @@ async fn migration_schema_desired_pgschema_reconcile_matches_populated_upgrade()
     let reconcile = include_str!("../../../../../scripts/reconcile-schema-after-pgschema.sql");
     sqlx::raw_sql(reconcile).execute(&pool).await.unwrap();
     assert_eq!(invite_revocation_state(&pool).await, before_reconcile);
-    // Reconciliation is schema-only and idempotent; the explicit maintenance
-    // script below owns historical data repair in both schema modes.
+    // Reconciliation is schema-only and idempotent; no historical data is
+    // rewritten by the desired-state path.
     sqlx::raw_sql(reconcile).execute(&pool).await.unwrap();
     assert_eq!(invite_revocation_state(&pool).await, before_reconcile);
-
-    run_invite_repair_script(&pool).await;
-    let repaired = invite_revocation_state(&pool).await;
-    assert_repaired_and_fenced(&pool, &cases).await;
-    run_invite_repair_script(&pool).await;
-    assert_eq!(invite_revocation_state(&pool).await, repaired);
-    assert_repaired_and_fenced(&pool, &cases).await;
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM relay_invites WHERE legacy_admission IS DISTINCT FROM true"
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap(),
+        0,
+        "pgschema preserves the legacy default for populated rows"
+    );
 }
