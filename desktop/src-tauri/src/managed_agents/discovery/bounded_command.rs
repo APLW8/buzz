@@ -594,6 +594,11 @@ mod tests {
             child: Option<BoundedChild>,
             armed: bool,
         }
+        impl FixtureTree {
+            fn disarm(&mut self) {
+                self.armed = false;
+            }
+        }
         impl Drop for FixtureTree {
             fn drop(&mut self) {
                 if self.armed {
@@ -677,7 +682,7 @@ mod tests {
                 worker.child.as_mut().expect("owned fixture"),
                 Duration::from_millis(300),
             );
-            worker.armed = false;
+            worker.disarm();
             let _ = tx.send((descendant_pid, result));
         });
         let (descendant_pid, result) = rx
@@ -694,7 +699,7 @@ mod tests {
             !pid_alive(descendant_pid),
             "backgrounded descendant {descendant_pid} must be group-killed on timeout, but it survived"
         );
-        fixture.armed = false;
+        fixture.disarm();
     }
 
     // Deterministic seam regression (Thufir's finding): a drain fed a reader
