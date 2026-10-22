@@ -1,4 +1,7 @@
 import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:buzz/shared/relay/identity_archives.dart';
 
 import 'package:buzz/features/channels/channel.dart';
 import 'package:buzz/features/channels/channel_management_provider.dart';
@@ -32,7 +35,9 @@ class _Relay extends RelaySessionNotifier {
   Future<List<NostrEvent>> queryRelay(
     List<NostrFilter> filters, {
     Duration timeout = const Duration(seconds: 8),
-  }) async => [profile];
+  }) async => filters.single.kinds.single == EventKind.archivedIdentities
+      ? []
+      : [profile];
 
   @override
   Future<List<NostrEvent>> fetchHistory(
@@ -87,7 +92,18 @@ void main() {
         baseUrl: 'https://relay.test',
         nsec: owner.nsec,
       );
-      final sync = MeSync(relay, config, prefs: prefs);
+      final sync = MeSync(
+        relay,
+        config,
+        prefs: prefs,
+        archives: IdentityArchives(
+          config.baseUrl,
+          relay,
+          client: () => MockClient(
+            (_) async => http.Response(jsonEncode({'self': owner.public}), 200),
+          ),
+        ),
+      );
       final nativeChannels = <MethodChannel>[];
       const platformViews = MethodChannel('flutter/platform_views');
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(

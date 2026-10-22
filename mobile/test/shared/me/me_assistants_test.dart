@@ -1,4 +1,7 @@
 import 'dart:async';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:buzz/shared/relay/identity_archives.dart';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:buzz/shared/me/me_assistants.dart';
@@ -14,6 +17,7 @@ class _Relay extends RelaySessionNotifier {
   final requestedPages = <int>[];
   final requestedTags = <Map<String, dynamic>>[];
   final requestedAuthors = <List<String>?>[];
+  List<NostrEvent> archives = [];
   _Relay(this.pages);
   @override
   SessionState build() => const SessionState(status: SessionStatus.connected);
@@ -22,6 +26,9 @@ class _Relay extends RelaySessionNotifier {
     List<NostrFilter> filters, {
     Duration timeout = const Duration(seconds: 8),
   }) async {
+    if (filters.single.kinds.single == EventKind.archivedIdentities) {
+      return archives;
+    }
     expect(filters.single.kinds, [0]);
     requestedTags.add(filters.single.toJson());
     requestedAuthors.add(filters.single.authors);
@@ -72,6 +79,13 @@ void main() {
   ProviderContainer setup(_Relay relay) {
     final sync = MeSync(
       relay,
+      archives: IdentityArchives(
+        'https://relay.test',
+        relay,
+        client: () => MockClient(
+          (_) async => http.Response(jsonEncode({'self': other.public}), 200),
+        ),
+      ),
       RelayConfig(
         baseUrl: 'https://relay.test',
         nsec: nostr.Nip19.encode(
@@ -89,6 +103,33 @@ void main() {
     addTearDown(container.dispose);
     return container;
   }
+
+  test('fresh directory and creation exclude archived owned agents', () async {
+    final relay = _Relay([
+      [profile(agent, ownedBy: owner)],
+    ]);
+    final container = setup(relay);
+    expect(await container.read(meAssistantsProvider.future), hasLength(1));
+    relay.archives = [
+      NostrEvent.fromJson(
+        nostr.Event.from(
+          kind: EventKind.archivedIdentities,
+          content: '',
+          secretKey: other.secret,
+          tags: [
+            ['-'],
+            ['p', agent.public],
+          ],
+        ).toMap(),
+      ),
+    ];
+    container.invalidate(meAssistantsProvider);
+    expect(await container.read(meAssistantsProvider.future), isEmpty);
+    expect(
+      await isOwnedMeAssistant(container.read(meSyncProvider), agent.public),
+      isFalse,
+    );
+  });
 
   test('directory verification keeps the event loop responsive', () async {
     final agents = [for (var i = 0; i < 99; i++) nostr.Keys.generate()];

@@ -9,6 +9,7 @@ import '../theme/theme_provider.dart';
 
 import '../crypto/nip44.dart';
 import '../relay/relay.dart';
+import '../relay/identity_archives.dart';
 import 'me_groups.dart';
 import 'me_recovery.dart';
 import 'me_journal.dart';
@@ -192,6 +193,11 @@ final Provider<MeSync> meSyncProvider = Provider<MeSync>((ref) {
 class MeSync {
   final RelaySessionNotifier session;
   final RelayConfig config;
+
+  /// Session-scoped authority and ordering checks for archived identities.
+  late final IdentityArchives archives =
+      _archives ?? IdentityArchives(config.baseUrl, session);
+  final IdentityArchives? _archives;
   late final String community = Uri.parse(config.baseUrl).origin;
   late final String privateHex = nostr.Nip19.decode(payload: config.nsec!).data;
   late final String pubkey = nostr.Keys(privateHex).public;
@@ -214,7 +220,9 @@ class MeSync {
     bool connected = true,
     this.connectionState,
     this.prefs,
-  }) : _connected = connected;
+    IdentityArchives? archives,
+  }) : _archives = archives,
+       _connected = connected;
 
   /// Encrypted last verified organization, isolated by account and community.
   String get cacheKey => 'me-cache:$community:$pubkey';

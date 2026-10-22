@@ -101,7 +101,10 @@ Future<List<AgentDirectoryEntry>> _loadAssistants(
     sync.pubkey,
   ));
   sync.check();
-  return agents;
+  if (agents.isEmpty) return agents;
+  final archived = await sync.archives.read();
+  sync.check();
+  return agents.where((agent) => !archived.contains(agent.pubkey)).toList();
 }
 
 List<NostrEvent> _verifyProfiles(List<NostrEvent> events) {
