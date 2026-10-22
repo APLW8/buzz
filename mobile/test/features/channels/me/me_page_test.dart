@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:buzz/shared/mentions/agent_identity_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:buzz/shared/me/me_chat_creation.dart';
 import 'package:flutter/foundation.dart';
@@ -98,6 +99,96 @@ void main() {
     expect(find.text('Inaccessible labeled chat'), findsNothing);
     expect(find.text('A place to work with your agents'), findsNothing);
   });
+
+  for (final platform in [TargetPlatform.iOS, TargetPlatform.android]) {
+    testWidgets('New chat refreshes desktop agents on every open: $platform', (
+      tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = platform;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final action = ValueNotifier<VoidCallback?>(null);
+      addTearDown(action.dispose);
+      var directory = <AgentDirectoryEntry>[];
+      final presentations = <Map>[];
+      const channel = MethodChannel('buzz/profile_text_editor');
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+        call,
+      ) async {
+        if (call.method == 'presentChat') {
+          presentations.add(call.arguments as Map);
+        }
+        return null;
+      });
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          null,
+        ),
+      );
+      final sync = MeSync(
+        RelaySessionNotifier(),
+        RelayConfig(
+          baseUrl: 'https://relay.test',
+          nsec: nostr.Nip19.encode(
+            prefix: nostr.Nip19Prefix.nsec,
+            data:
+                '0000000000000000000000000000000000000000000000000000000000000001',
+          ),
+        ),
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            meGroupsProvider.overrideWith(
+              (ref) => Stream.value(const MeGroups()),
+            ),
+            meSyncProvider.overrideWithValue(sync),
+            channelsProvider.overrideWith(FakeChannels.new),
+            meAssistantsProvider.overrideWith((ref) async => directory),
+          ],
+          child: MaterialApp(
+            theme: AppTheme.light(),
+            home: MePage(newChatAction: action),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      // Solo has warmed an empty directory. First open also sees no agents.
+      action.value!();
+      await tester.pumpAndSettle();
+      if (platform == TargetPlatform.iOS) {
+        expect(presentations.single['assistants'], isEmpty);
+      } else {
+        expect(find.textContaining('No agents are available'), findsOneWidget);
+        Navigator.of(tester.element(find.byType(BottomSheet))).pop();
+        await tester.pumpAndSettle();
+      }
+      // Desktop publishes an agent while the mobile session stays connected.
+      directory = const [
+        AgentDirectoryEntry(
+          pubkey: 'new-agent',
+          displayName: 'New desktop agent',
+        ),
+      ];
+      action.value!();
+      await tester.pumpAndSettle();
+      if (platform == TargetPlatform.iOS) {
+        expect(presentations, hasLength(2));
+        expect(presentations.last['assistants'], hasLength(1));
+        expect(
+          (presentations.last['assistants'] as List).single,
+          containsPair('name', 'New desktop agent'),
+        );
+      } else {
+        await tester.tap(find.byKey(const ValueKey('new-session-assistant')));
+        await tester.pumpAndSettle();
+        expect(find.text('New desktop agent'), findsOneWidget);
+      }
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+      debugDefaultTargetPlatformOverride = null;
+    });
+  }
 
   testWidgets('empty workspace stays centered behind the New chat keyboard', (
     tester,
@@ -311,7 +402,7 @@ void main() {
         .firstWhere((action) => action.label == 'New chat')
         .onPressed!();
     await tester.pumpAndSettle();
-    expect(directoryLoads, 1);
+    expect(directoryLoads, 2);
     expect(calls, hasLength(1));
     expect(calls.single.method, 'presentChat');
     final args = calls.single.arguments as Map;
@@ -394,7 +485,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text(resume ? 'Resume' : 'Discard setup'));
       await tester.pumpAndSettle();
-      expect(directoryLoads, 1);
+      expect(directoryLoads, 2);
       expect(calls, hasLength(1));
       expect(calls.single.method, 'presentChat');
       final args = calls.single.arguments as Map;

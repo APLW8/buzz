@@ -37,6 +37,9 @@ Future<(Channel, String)?> _showNewMeChat(
     }
   }
   if (!context.mounted) return null;
+  // Agents created on desktop do not invalidate this session's cached directory.
+  // Refresh once per opening, before either picker takes its list snapshot.
+  ref.invalidate(meAssistantsProvider);
   if (defaultTargetPlatform == TargetPlatform.iOS) {
     final sync = ref.read(meSyncProvider);
     final pending = MeChatCreation.pending(sync);

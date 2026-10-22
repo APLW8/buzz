@@ -164,6 +164,56 @@ NostrEvent _huddleEvent({
 );
 
 void main() {
+  test('agent audience presentation comes from the original signed event', () {
+    final messages = formatTimeline([
+      _textMsg(
+        id: 'coordination',
+        extraTags: [
+          ['audience', 'agents'],
+        ],
+      ),
+      _edit(
+        id: 'edit',
+        targetId: 'coordination',
+        content: 'Updated',
+        extraTags: [
+          ['audience', 'everyone'],
+        ],
+      ),
+      _textMsg(id: 'ordinary'),
+      _edit(
+        id: 'edit-ordinary',
+        targetId: 'ordinary',
+        content: 'Still ordinary',
+        extraTags: [
+          ['audience', 'agents'],
+        ],
+      ),
+      _textMsg(
+        id: 'everyone',
+        extraTags: [
+          ['audience', 'everyone'],
+        ],
+      ),
+      _textMsg(
+        id: 'unknown',
+        extraTags: [
+          ['audience', 'future'],
+        ],
+      ),
+    ]);
+    expect(
+      messages.singleWhere((m) => m.id == 'coordination').isAgentCoordination,
+      isTrue,
+    );
+    expect(
+      messages
+          .where((m) => m.id != 'coordination')
+          .every((m) => !m.isAgentCoordination),
+      isTrue,
+    );
+  });
+
   group('SystemEvent.fromContent', () {
     test('parses all known event types', () {
       final types = {

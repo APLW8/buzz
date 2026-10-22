@@ -184,6 +184,9 @@ class TimelineMessage {
   final List<List<String>> tags;
   final bool isSystem;
   final bool edited;
+
+  /// The original signed event addresses agents rather than the conversation.
+  final bool isAgentCoordination;
   final SystemEvent? systemEvent;
 
   /// Pubkeys mentioned in this message (from p-tags).
@@ -206,6 +209,7 @@ class TimelineMessage {
     this.tags = const [],
     this.isSystem = false,
     this.edited = false,
+    this.isAgentCoordination = false,
     this.systemEvent,
     this.mentionPubkeys = const [],
     this.reactions = const [],
@@ -539,6 +543,10 @@ List<TimelineMessage> formatTimeline(
           content: edit?.content ?? event.content,
           tags: effectiveTags,
           edited: edit != null,
+          isAgentCoordination: event.tags.any(
+            (tag) =>
+                tag.length >= 2 && tag[0] == 'audience' && tag[1] == 'agents',
+          ),
           mentionPubkeys: mentions,
           reactions: reactionsFor(event.id),
           parentId: threadRef.parentId,

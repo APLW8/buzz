@@ -215,6 +215,39 @@ void bubbleLayoutTests() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('collapsed agent updates also hide citation metadata', (
+    tester,
+  ) async {
+    const metadata =
+        '<oai-mem-citation>\n<citation_entries>memory</citation_entries>\n</oai-mem-citation>';
+    await tester.pumpWidget(
+      _buildTestable(
+        knownAgentPubkeys: {'alice'},
+        messages: [
+          _textMsg(
+            id: 'update-citation',
+            pubkey: 'alice',
+            content: 'Visible update\n$metadata',
+            extraTags: [
+              ['audience', 'agents'],
+            ],
+          ),
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Visible update'), findsOneWidget);
+    expect(find.textContaining('oai-mem-citation'), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('message-row-update-citation')));
+    await tester.pumpAndSettle();
+    final visible = tester
+        .widgetList<RichText>(find.byType(RichText))
+        .map((w) => w.text.toPlainText())
+        .join('\n');
+    expect(visible, contains('Visible update'));
+    expect(visible, isNot(contains('oai-mem-citation')));
+  });
+
   for (final surface in ['channel', 'solo', 'thread']) {
     for (final agent in [false, true]) {
       testWidgets(
@@ -272,6 +305,71 @@ void bubbleLayoutTests() {
       );
     }
   }
+
+  testWidgets(
+    'agent audience updates collapse without a bubble and expand on tap',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(390, 844));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      const update =
+          'Playback completed successfully.\nThe MIDI and WAV checks passed.';
+      await tester.pumpWidget(
+        _buildTestable(
+          messages: [
+            _textMsg(
+              id: 'before',
+              pubkey: 'alice',
+              content: 'I will make a script.',
+            ),
+            _textMsg(
+              id: 'update',
+              pubkey: 'alice',
+              content: update,
+              createdAt: 1001,
+              extraTags: [
+                ['audience', 'agents'],
+              ],
+            ),
+            _textMsg(
+              id: 'after',
+              pubkey: 'alice',
+              content: 'Implemented and attached.',
+              createdAt: 1002,
+            ),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+      final row = find.byKey(const ValueKey('message-row-update'));
+      Finder body() =>
+          find.descendant(of: row, matching: find.byType(MessageContent));
+      expect(body(), findsNothing);
+      final preview = tester.widget<Text>(
+        find.text(update.replaceAll('\n', ' ')),
+      );
+      expect(preview.maxLines, 1);
+      expect(preview.overflow, TextOverflow.ellipsis);
+      for (final id in ['before', 'after']) {
+        final ordinary = tester.widget<MessageContent>(
+          find.descendant(
+            of: find.byKey(ValueKey('message-row-$id')),
+            matching: find.byType(MessageContent),
+          ),
+        );
+        expect(ordinary.bubble, isTrue);
+        expect(ordinary.bubbleStart, isTrue);
+        expect(ordinary.bubbleEnd, isTrue);
+      }
+      await tester.tap(row);
+      await tester.pumpAndSettle();
+      expect(tester.widget<MessageContent>(body()).bubble, isFalse);
+      expect(tester.widget<MessageContent>(body()).content, update);
+      await tester.tap(find.byKey(const ValueKey('collapse-update-update')));
+      await tester.pumpAndSettle();
+      expect(body(), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('large activity members build and fetch only visible rows', (
     tester,

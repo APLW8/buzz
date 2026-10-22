@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:buzz/shared/me/me_assistants.dart';
@@ -88,6 +89,59 @@ void main() {
     addTearDown(container.dispose);
     return container;
   }
+
+  test('directory verification keeps the event loop responsive', () async {
+    final agents = [for (var i = 0; i < 99; i++) nostr.Keys.generate()];
+    final events = [for (final key in agents) profile(key, ownedBy: owner)];
+    final container = setup(_Relay([events]));
+    final stopwatch = Stopwatch()..start();
+    var lastTick = Duration.zero;
+    var longestGap = Duration.zero;
+    var ticks = 0;
+    void recordGap() {
+      final now = stopwatch.elapsed;
+      final gap = now - lastTick;
+      if (gap > longestGap) longestGap = gap;
+      lastTick = now;
+    }
+
+    final timer = Timer.periodic(const Duration(milliseconds: 10), (_) {
+      ticks++;
+      recordGap();
+    });
+    addTearDown(timer.cancel);
+    final result = await container.read(meAssistantsProvider.future);
+    recordGap();
+    timer.cancel();
+    expect(
+      result.map((entry) => entry.pubkey),
+      unorderedEquals(agents.map((key) => key.public)),
+    );
+    expect(
+      ticks,
+      greaterThan(0),
+      reason: 'Crypto must allow UI events to run.',
+    );
+    expect(
+      longestGap,
+      lessThan(const Duration(milliseconds: 500)),
+      reason: 'Verification must not monopolize the UI isolate.',
+    );
+  });
+
+  test('community change during verification rejects the result', () async {
+    final container = setup(
+      _Relay([
+        [profile(agent, ownedBy: owner)],
+      ]),
+    );
+    final sync = container.read(meSyncProvider);
+    final loading = container.read(meAssistantsProvider.future);
+    // The relay future completes in a microtask; this event runs while the
+    // verification isolate is working, before its result is admitted.
+    Timer.run(() => sync.disposed = true);
+    await expectLater(loading, throwsA(isA<StateError>()));
+  });
 
   test('finds owned kind 0 agents without legacy directory entries', () async {
     final valid = profile(agent, ownedBy: owner);

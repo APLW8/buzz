@@ -1,4 +1,5 @@
 import 'message_swipe_reply.dart';
+import '../../shared/markdown/assistant_citations.dart';
 import 'agent_reply_handoff.dart';
 import 'huddle_timeline.dart';
 import '../../shared/widgets/modal_presentation.dart';

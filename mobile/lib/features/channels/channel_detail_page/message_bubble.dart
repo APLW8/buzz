@@ -39,6 +39,7 @@ class _MessageBubble extends HookConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final coordinationExpanded = useState(false);
     final messageSnapshotKey = useMemoized(GlobalKey.new, const []);
     final swipeContentKey = useMemoized(GlobalKey.new, const []);
     final mediaOffset = useMessageMediaOffset(message.content, message.tags);
@@ -65,6 +66,13 @@ class _MessageBubble extends HookConsumerWidget {
     final isAgent =
         ref.watch(agentMentionPubkeysProvider(currentChannelId)).contains(pk) ||
         profile?.ownerPubkey != null;
+    final coordinationPreview = useMemoized(() {
+      if (!message.isAgentCoordination) return '';
+      final text = isAgent
+          ? assistantDisplayContent(message.content)
+          : message.content;
+      return text.replaceAll(RegExp(r'\s+'), ' ').trim();
+    }, [message.isAgentCoordination, message.content, isAgent]);
     final canManageMessage =
         currentPubkey?.toLowerCase() == pk ||
         (profile?.ownerPubkey != null &&
@@ -130,6 +138,66 @@ class _MessageBubble extends HookConsumerWidget {
         onPopoverDismissed: () => details.setSourceHidden(false),
         composerFocusNode: composerFocusNode,
         restoreComposerFocus: restoreComposerFocus,
+      );
+    }
+
+    if (message.isAgentCoordination && !coordinationExpanded.value) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: Grid.xxs),
+        child: Material(
+          color: Colors.transparent,
+          child: MessageLongPressInkWell(
+            key: ValueKey('message-row-${message.id}'),
+            snapshotKey: messageSnapshotKey,
+            onLongPressDetails: openMessageActions,
+            onTap: () => coordinationExpanded.value = true,
+            child: RepaintBoundary(
+              key: messageSnapshotKey,
+              child: Semantics(
+                button: true,
+                expanded: false,
+                label: 'Agent update from $displayName. Show message',
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: messageAvatarSize,
+                      child: Center(
+                        child: SizedBox.square(
+                          dimension: Grid.sm,
+                          child: FittedBox(
+                            child: _UserAvatar(
+                              profile: profile,
+                              pubkey: message.pubkey,
+                              isAgent: isAgent,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: messageAvatarContentGap),
+                    Expanded(
+                      child: Text(
+                        coordinationPreview,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: context.textTheme.bodySmall?.copyWith(
+                          color: context.colors.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: Grid.xs),
+                    Text(
+                      formatMessageTime(message.createdAt),
+                      style: context.textTheme.labelSmall?.copyWith(
+                        color: context.colors.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
       );
     }
 
@@ -255,6 +323,17 @@ class _MessageBubble extends HookConsumerWidget {
                                     ? CrossAxisAlignment.end
                                     : CrossAxisAlignment.start,
                                 children: [
+                                  if (message.isAgentCoordination)
+                                    TextButton(
+                                      key: ValueKey(
+                                        'collapse-update-${message.id}',
+                                      ),
+                                      onPressed: () =>
+                                          coordinationExpanded.value = false,
+                                      child: const Text(
+                                        'Collapse agent update',
+                                      ),
+                                    ),
                                   if (showAuthor)
                                     Padding(
                                       padding: EdgeInsets.only(
@@ -348,7 +427,7 @@ class _MessageBubble extends HookConsumerWidget {
                                       key: swipeContentKey,
                                       isAssistant: isAgent,
                                       content: message.content,
-                                      bubble: true,
+                                      bubble: !message.isAgentCoordination,
                                       hasReactions:
                                           message.reactions.isNotEmpty ||
                                           replyFooter != null,

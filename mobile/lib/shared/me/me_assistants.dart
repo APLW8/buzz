@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:nostr/nostr.dart' as nostr;
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
@@ -68,17 +69,18 @@ Future<List<AgentDirectoryEntry>> _loadAssistants(
     if (events.length > pageSize) {
       throw StateError('Agent directory exceeded the requested page size.');
     }
+    // Signature verification is CPU-heavy. Keep it off the UI isolate,
+    // including during refreshes triggered by opening New chat.
+    final verified = await compute(_verifyProfiles, [
+      for (final event in events)
+        if (event.kind == 0 &&
+            (pubkey == null || event.pubkey == pubkey) &&
+            !seen.contains(event.id))
+          event,
+    ]);
+    sync.check();
     var added = false;
-    for (final event in events) {
-      if (event.kind != 0 || (pubkey != null && event.pubkey != pubkey)) {
-        continue;
-      }
-      if (seen.contains(event.id)) continue;
-      try {
-        nostr.Event.fromJson(jsonEncode(event.toJson()));
-      } catch (_) {
-        continue;
-      }
+    for (final event in verified) {
       if (!seen.add(event.id)) continue;
       added = true;
       final previous = profiles[event.pubkey];
@@ -94,10 +96,34 @@ Future<List<AgentDirectoryEntry>> _loadAssistants(
       throw StateError('Could not finish loading assistants. Try again.');
     }
   }
-  final agents = <AgentDirectoryEntry>[];
-  for (final event in profiles.values) {
+  final agents = await compute(_ownedAssistants, (
+    profiles.values.toList(),
+    sync.pubkey,
+  ));
+  sync.check();
+  return agents;
+}
+
+List<NostrEvent> _verifyProfiles(List<NostrEvent> events) {
+  final verified = <NostrEvent>[];
+  for (final event in events) {
     try {
-      if (verifiedProfileOaOwnerPubkey(event) == sync.pubkey) {
+      nostr.Event.fromJson(jsonEncode(event.toJson()));
+      verified.add(event);
+    } catch (_) {
+      // Invalid event signatures must never enter latest-profile selection.
+      continue;
+    }
+  }
+  return verified;
+}
+
+List<AgentDirectoryEntry> _ownedAssistants((List<NostrEvent>, String) input) {
+  final (profiles, owner) = input;
+  final agents = <AgentDirectoryEntry>[];
+  for (final event in profiles) {
+    try {
+      if (verifiedProfileOaOwnerPubkey(event) == owner) {
         agents.add(AgentDirectoryEntry.fromEvent(event));
       }
     } catch (_) {
