@@ -39,7 +39,6 @@ class _MessageBubble extends HookConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final coordinationExpanded = useState(false);
     final messageSnapshotKey = useMemoized(GlobalKey.new, const []);
     final swipeContentKey = useMemoized(GlobalKey.new, const []);
     final mediaOffset = useMessageMediaOffset(message.content, message.tags);
@@ -141,7 +140,7 @@ class _MessageBubble extends HookConsumerWidget {
       );
     }
 
-    if (message.isAgentCoordination && !coordinationExpanded.value) {
+    if (message.isAgentCoordination) {
       final collapsed = Padding(
         key: swipeContentKey,
         padding: const EdgeInsets.symmetric(vertical: Grid.xxs),
@@ -151,13 +150,10 @@ class _MessageBubble extends HookConsumerWidget {
             key: ValueKey('message-row-${message.id}'),
             snapshotKey: messageSnapshotKey,
             onLongPressDetails: openMessageActions,
-            onTap: () => coordinationExpanded.value = true,
             child: RepaintBoundary(
               key: messageSnapshotKey,
               child: Semantics(
-                button: true,
-                expanded: false,
-                label: 'Agent update from $displayName. Show message',
+                label: 'Agent update from $displayName',
                 child: Row(
                   children: [
                     SizedBox(
@@ -208,7 +204,11 @@ class _MessageBubble extends HookConsumerWidget {
         currentPubkey: currentPubkey,
         isMember: isMember,
         isArchived: isArchived,
-        child: collapsed,
+        child: AgentReplyHandoff(
+          key: ValueKey('reply-handoff-${message.id}'),
+          animate: typingHandoff,
+          child: collapsed,
+        ),
       );
     }
 
@@ -334,17 +334,6 @@ class _MessageBubble extends HookConsumerWidget {
                                     ? CrossAxisAlignment.end
                                     : CrossAxisAlignment.start,
                                 children: [
-                                  if (message.isAgentCoordination)
-                                    TextButton(
-                                      key: ValueKey(
-                                        'collapse-update-${message.id}',
-                                      ),
-                                      onPressed: () =>
-                                          coordinationExpanded.value = false,
-                                      child: const Text(
-                                        'Collapse agent update',
-                                      ),
-                                    ),
                                   if (showAuthor)
                                     Padding(
                                       padding: EdgeInsets.only(

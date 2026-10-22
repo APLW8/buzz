@@ -11078,6 +11078,71 @@ void main() {
       expect(findRichText('Here is the reply'), findsOneWidget);
     });
 
+    testWidgets('Me compact reply consumes typing and animates', (
+      tester,
+    ) async {
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final prompt = _textMsg(
+        id: threadIdRoot,
+        pubkey: 'self',
+        content: 'Hello',
+        createdAt: now - 3,
+      );
+      final typing = _FakeTypingNotifier(const []);
+      await tester.pumpWidget(
+        _buildTestable(
+          personalChat: true,
+          messages: [prompt],
+          typingNotifier: typing,
+          users: const {
+            'alice': UserProfile(pubkey: 'alice', displayName: 'Alice'),
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+      typing.setEntries([
+        TypingEntry(
+          pubkey: 'alice',
+          threadHeadId: threadIdRoot,
+          expiresAtMs: (now - 1) * 1000 + 8000,
+        ),
+      ]);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 250));
+      expect(find.byKey(const ValueKey('agent-typing-bubble')), findsOneWidget);
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(ChannelDetailPage)),
+      );
+      final messages =
+          container.read(meMessagesProvider(_channelId).notifier)
+              as _FakeMessagesNotifier;
+      messages.setMessages([
+        prompt,
+        _textMsg(
+          id: 'reply',
+          pubkey: 'alice',
+          content: 'Here is the reply',
+          createdAt: now,
+          extraTags: [
+            ['e', threadIdRoot, '', 'reply'],
+            ['audience', 'agents'],
+          ],
+        ),
+      ]);
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('inline-agent-typing-alice')),
+        findsNothing,
+      );
+      final handoff = tester.widget<AgentReplyHandoff>(
+        find.byKey(const ValueKey('reply-handoff-reply')),
+      );
+      expect(handoff.animate, isTrue);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('agent-typing-bubble')), findsNothing);
+      expect(find.text('Here is the reply'), findsOneWidget);
+    });
+
     for (final personal in [true, false]) {
       testWidgets('reply-scoped typing is visible only in flat Me: $personal', (
         tester,

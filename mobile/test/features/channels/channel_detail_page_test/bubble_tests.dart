@@ -307,7 +307,7 @@ void bubbleLayoutTests() {
   }
 
   testWidgets(
-    'agent audience updates collapse without a bubble and expand on tap',
+    'agent audience updates stay compact on tap and preserve swipe reply',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(390, 844));
       addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -361,10 +361,6 @@ void bubbleLayoutTests() {
         expect(ordinary.bubbleEnd, isTrue);
       }
       await tester.tap(row);
-      await tester.pumpAndSettle();
-      expect(tester.widget<MessageContent>(body()).bubble, isFalse);
-      expect(tester.widget<MessageContent>(body()).content, update);
-      await tester.tap(find.byKey(const ValueKey('collapse-update-update')));
       await tester.pumpAndSettle();
       expect(body(), findsNothing);
       await tester.drag(row, const Offset(150, 0));
