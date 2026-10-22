@@ -543,6 +543,7 @@ mod postgres_tests {
             "product_feedback",
             "replica_heartbeat",
             "community_deletion_requests",
+            "entity_deletion_requests",
             "community_deletion_approvals",
             "community_deletion_checkpoints",
             "community_deletion_manifest_keys",
@@ -769,7 +770,12 @@ mod postgres_tests {
         let mut migrations: Vec<_> = MIGRATOR.iter().collect();
         migrations.sort_by_key(|migration| migration.version);
 
-        assert_eq!(migrations.len(), 70);
+        assert_eq!(migrations.len(), 71);
+        assert_eq!(migrations[67].version, 68);
+        assert!(migrations[67]
+            .sql
+            .as_str()
+            .contains("CREATE TABLE entity_deletion_requests"));
         assert_eq!(migrations[64].version, 65);
         let retire_ttl = strip_sql_comments(migrations[64].sql.as_str());
         for statement in [
@@ -2704,13 +2710,13 @@ mod postgres_tests {
     ///
     /// This bootstraps one probe database from `schema.sql` **through the real
     /// `bin/pgschema apply` binary** — the exact path CI (`ci.yml`) and both
-    /// test-relay launchers take — and migrates another through 1–38, then
-    /// asserts the three admin tables have identical column definitions (name,
-    /// type, nullability, default) and identical index shapes, including each
+    /// test-relay launchers take — and migrates another through the latest
+    /// migration, then asserts the admin and entity-intake tables have identical
+    /// column definitions (name, type, nullability, default) and index shapes, including each
     /// key's catalog sort/null options (`pg_index.indoption`). Columns are keyed
     /// by name, not ordinal, because migrations append via `ALTER TABLE` while
     /// `schema.sql` declares them inline — positions legitimately differ, shapes
-    /// must not.
+    /// must not. Entity-intake constraints are also compared in the live catalog.
     ///
     /// Driving the real binary is load-bearing: `pgschema` 1.7.4 discards
     /// per-key `NULLS FIRST`/`NULLS LAST` when it re-emits an index, so a naive
@@ -2767,6 +2773,22 @@ mod postgres_tests {
             .await
             .expect("read index shapes")
         }
+
+        async fn constraints(pool: &PgPool, table: &str) -> Vec<(String, String, bool)> {
+            sqlx::query_as(
+                "SELECT con.conname, pg_get_constraintdef(con.oid), con.convalidated \
+                 FROM pg_constraint con \
+                 JOIN pg_class t ON t.oid = con.conrelid \
+                 JOIN pg_namespace n ON n.oid = t.relnamespace \
+                 WHERE n.nspname = 'public' AND t.relname = $1 \
+                 ORDER BY con.conname",
+            )
+            .bind(table)
+            .fetch_all(pool)
+            .await
+            .expect("read constraint definitions")
+        }
+
         let base_url = std::env::var("BUZZ_TEST_DATABASE_URL")
             .or_else(|_| std::env::var("DATABASE_URL"))
             .unwrap_or_else(|_| TEST_DB_URL.to_owned());
@@ -2800,20 +2822,27 @@ mod postgres_tests {
         let desired = PgPool::connect(&format!("{base_prefix}/{desired_db}"))
             .await
             .expect("connect desired-state probe database");
+        sqlx::raw_sql(include_str!(
+            "../../../../scripts/reconcile-schema-after-pgschema.sql"
+        ))
+        .execute(&desired)
+        .await
+        .expect("reconcile desired-state probe database");
         let migrated = PgPool::connect(&format!("{base_prefix}/{migrated_db}"))
             .await
             .expect("connect migrated probe database");
         MIGRATOR
-            .run_to(70, &migrated)
+            .run(&migrated)
             .await
-            .expect("apply migrations 1-70");
+            .expect("apply migrations for schema parity");
 
         for table in [
             "relay_admin_actions",
             "relay_admin_outbox",
             "relay_operator_audit",
-            "artifact_revisions",
+            "entity_deletion_requests",
             "artifact_heads",
+            "artifact_revisions",
             "channel_members",
             "communities",
         ] {
@@ -2832,6 +2861,12 @@ mod postgres_tests {
                  migration and schema.sql must both use a representable shape."
             );
         }
+
+        assert_eq!(
+            constraints(&desired, "entity_deletion_requests").await,
+            constraints(&migrated, "entity_deletion_requests").await,
+            "constraint parity mismatch for entity_deletion_requests"
+        );
 
         desired.close().await;
         migrated.close().await;
