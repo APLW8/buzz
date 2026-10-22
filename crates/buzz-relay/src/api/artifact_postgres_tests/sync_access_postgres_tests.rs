@@ -384,3 +384,30 @@ async fn sync_progress_replays_queries_with_escaped_values() {
     assert!(status.is_success(), "{status}: {next}");
     assert_eq!(next["changes"], json!([]));
 }
+
+#[tokio::test]
+#[ignore = "requires Postgres"]
+async fn sync_current_intersects_known_ids_with_query_scope() {
+    let _guard = SERIAL.lock().await;
+    let f = fixture().await;
+    let included = Uuid::new_v4();
+    let excluded = Uuid::new_v4();
+    let event = f.revision(included, "create", None);
+    accept(&f, &event).await;
+    accept(&f, &f.revision(excluded, "create", None)).await;
+    let (status, body) = f
+        .request(
+            "/query",
+            json!([{"artifact":"sync","action":"current",
+                "query":{"artifact":"current","#type":["buzz.task"],"#d":[included]},
+                "artifactIds":[included,excluded]}]),
+        )
+        .await;
+    assert!(status.is_success(), "{status}: {body}");
+    assert_eq!(body["changes"][0]["artifactId"], included.to_string());
+    assert_eq!(body["changes"][0]["event"]["id"], event.id.to_hex());
+    assert_eq!(
+        body["changes"][1],
+        json!({"type":"remove","artifactId":excluded})
+    );
+}

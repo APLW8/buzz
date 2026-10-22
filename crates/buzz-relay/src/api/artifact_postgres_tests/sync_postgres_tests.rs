@@ -2,6 +2,8 @@ use super::*;
 use axum::http::StatusCode;
 #[path = "sync_access_postgres_tests.rs"]
 mod access_postgres_tests;
+#[path = "sync_cursor_postgres_tests.rs"]
+mod cursor_postgres_tests;
 #[path = "sync_policy_postgres_tests.rs"]
 mod policy_postgres_tests;
 #[path = "sync_scale_postgres_tests.rs"]

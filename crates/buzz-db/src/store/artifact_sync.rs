@@ -120,14 +120,6 @@ impl Db {
         if ids.is_empty() {
             return Ok(vec![]);
         }
-        let mut tags = query.tags.clone();
-        tags.push(("d".into(), ids.iter().map(Uuid::to_string).collect()));
-        let narrowed = ArtifactQuery {
-            view: query.view,
-            tags,
-            limit: PAGE_ROWS as i64,
-            offset: 0,
-        };
         let connection = crate::observability::acquire_writer(
             &self.pool,
             crate::observability::WriterOperation::SubscriptionHistory,
@@ -141,7 +133,8 @@ impl Db {
             .execute(&mut *tx)
             .await?;
         let mut qb = QueryBuilder::new("SELECT e.id,e.pubkey,e.created_at,e.kind,e.tags,e.content,e.sig,e.received_at,e.channel_id FROM events e ");
-        super::artifact_query::predicates(&mut qb, community, reader, &narrowed);
+        super::artifact_query::predicates(&mut qb, community, reader, query);
+        qb.push(" AND a.artifact_id=ANY(").push_bind(ids).push(")");
         qb.push(" LIMIT ").push_bind(PAGE_ROWS as i64);
         let mut events = Vec::new();
         let mut bytes = 0;
@@ -204,7 +197,7 @@ WITH readable AS NOT MATERIALIZED (
       AND m.sync_modified_at <= $4 AND a.channel_id IN (SELECT id FROM readable)
       AND (cardinality($8::text[])=0 OR a.artifact_type=ANY($8))
     UNION ALL
-    SELECT r.modified_at,3,encode(r.event_id,'hex'),r.artifact_id,NULL::uuid
+    SELECT DISTINCT r.modified_at,3,r.artifact_id::text,r.artifact_id,NULL::uuid
     FROM artifact_revisions r WHERE r.community_id=$1
       AND r.source_channel_id IS NOT NULL AND r.source_channel_id IN (SELECT id FROM readable)
       AND $3::timestamptz IS NOT NULL AND r.modified_at >= $3 AND r.modified_at <= $4
