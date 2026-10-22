@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../../shared/markdown/assistant_citations.dart';
 import '../../shared/widgets/ios_media_carousel.dart';
 import '../../shared/widgets/message_attachment_corners.dart';
 import 'dart:io';
@@ -95,6 +96,9 @@ String _safeDownloadedFilename(String filename) {
 class MessageContent extends HookConsumerWidget {
   final String content;
 
+  /// Whether the sender is a known agent; enables display-only metadata hiding.
+  final bool isAssistant;
+
   /// Paint conversation text bubbles while keeping attachments on the page.
   final bool bubble;
 
@@ -172,6 +176,7 @@ class MessageContent extends HookConsumerWidget {
   const MessageContent({
     super.key,
     required this.content,
+    this.isAssistant = false,
     this.bubble = false,
     this.ownMessage = false,
     this.trimTrailingSpacing = false,
@@ -197,6 +202,10 @@ class MessageContent extends HookConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final content = useMemoized(
+      () => isAssistant ? assistantDisplayContent(this.content) : this.content,
+      [this.content, isAssistant],
+    );
     final markdownTheme = GptMarkdownTheme.of(context);
     final chatColors = ChatColors.of(context);
     final ownTextColor = chatColors.foreground;

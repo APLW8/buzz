@@ -215,6 +215,64 @@ void bubbleLayoutTests() {
     expect(tester.takeException(), isNull);
   });
 
+  for (final surface in ['channel', 'solo', 'thread']) {
+    for (final agent in [false, true]) {
+      testWidgets(
+        'citation metadata on $surface uses agent=$agent classification',
+        (tester) async {
+          const metadata =
+              '<oai-mem-citation>\n<citation_entries>MEMORY.md:1-2|note=[test]</citation_entries>\n</oai-mem-citation>';
+          final events = [
+            _textMsg(
+              id: 'citation-message',
+              pubkey: 'alice',
+              content: 'Visible answer\n\n$metadata',
+              createdAt: 1000,
+            ),
+          ];
+          final messages = formatTimeline(events);
+          await tester.pumpWidget(
+            _buildTestable(
+              messages: events,
+              personalChat: surface == 'solo',
+              knownAgentPubkeys: agent ? {'alice'} : {},
+              users: const {
+                'alice': UserProfile(pubkey: 'alice', displayName: 'Alice'),
+              },
+              home: surface == 'thread'
+                  ? ThreadDetailPage(
+                      threadHead: messages.single,
+                      allMessages: messages,
+                      channelId: _channelId,
+                      currentPubkey: 'me',
+                      isMember: true,
+                      isArchived: false,
+                    )
+                  : null,
+            ),
+          );
+          await tester.pumpAndSettle();
+          final content = tester.widget<MessageContent>(
+            find.byType(MessageContent).first,
+          );
+          expect(content.isAssistant, agent);
+          expect(content.content, contains(metadata));
+          final text = tester
+              .widgetList<RichText>(
+                find.descendant(
+                  of: find.byType(MessageContent).first,
+                  matching: find.byType(RichText),
+                ),
+              )
+              .map((w) => w.text.toPlainText())
+              .join('\n');
+          expect(text, contains('Visible answer'));
+          expect(text.contains('oai-mem-citation'), !agent);
+        },
+      );
+    }
+  }
+
   testWidgets('large activity members build and fetch only visible rows', (
     tester,
   ) async {

@@ -346,6 +346,7 @@ class _MessageBubble extends HookConsumerWidget {
                                     animate: typingHandoff,
                                     child: MessageContent(
                                       key: swipeContentKey,
+                                      isAssistant: isAgent,
                                       content: message.content,
                                       bubble: true,
                                       hasReactions:

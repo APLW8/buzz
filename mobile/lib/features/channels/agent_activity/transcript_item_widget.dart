@@ -1,4 +1,5 @@
 import 'dart:convert';
+import '../../../shared/markdown/assistant_citations.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
@@ -34,6 +35,7 @@ class _MessageItemWidget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isAssistant = item.role == 'assistant';
+    final text = isAssistant ? assistantDisplayContent(item.text) : item.text;
     final badgeColor = isAssistant
         ? context.colors.primary
         : context.colors.onSurfaceVariant;
@@ -66,9 +68,9 @@ class _MessageItemWidget extends StatelessWidget {
             ],
           ),
           const SizedBox(height: Grid.half),
-          if (item.text.isNotEmpty)
+          if (text.isNotEmpty)
             GptMarkdown(
-              item.text,
+              text,
               style: context.textTheme.bodyMedium?.copyWith(
                 color: context.colors.onSurface,
               ),
