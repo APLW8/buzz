@@ -21,6 +21,7 @@ CREATE INDEX CONCURRENTLY idx_artifact_revisions_artifact
     ON public.artifact_revisions (community_id, artifact_id);
 ```
 
+Apply `0068_artifact_revision_lookup.sql` in a transaction after that prebuild.
 Then apply `0069_artifact_sync_timestamps.sql` in a
 transaction with its lock and statement budgets. The migration is idempotent
 for this prebuild step. Then build these indexes outside a transaction:
@@ -42,6 +43,11 @@ flags. It refuses a populated table whose index is missing. A fresh empty
 database can build the indexes under the migration's short budgets.
 Migration `0068` also verifies the exact definition and all three flags.
 Remove an invalid index with `DROP INDEX CONCURRENTLY` before a new build.
+
+After all index builds succeed, run `buzz-admin migrate` with the target
+`DATABASE_URL`. It verifies and records `0068`, reapplies the idempotent `0069`,
+then verifies and records `0070`. Direct SQL application does not record the
+migration ledger.
 
 ## Enable and rollback
 

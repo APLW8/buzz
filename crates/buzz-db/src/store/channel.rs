@@ -915,9 +915,9 @@ pub async fn update_channel(
     }
     if policy_changed {
         sqlx::query(
-            "UPDATE communities SET artifact_policy_modified_at=clock_timestamp() WHERE id=$1 AND (EXISTS(SELECT 1 FROM artifact_heads WHERE community_id=$1 AND channel_id=$2) OR EXISTS(SELECT 1 FROM artifact_revisions WHERE community_id=$1 AND source_channel_id=$2))",
+            "UPDATE communities SET artifact_policy_modified_at=clock_timestamp() WHERE id=$1",
         )
-        .bind(community_id.as_uuid()).bind(channel_id)
+        .bind(community_id.as_uuid())
         .execute(tx.conn())
         .await?;
     }
@@ -1119,9 +1119,9 @@ pub async fn soft_delete_channel(
 
     if result.rows_affected() > 0 {
         sqlx::query(
-            "UPDATE communities SET artifact_policy_modified_at=clock_timestamp() WHERE id=$1 AND (EXISTS(SELECT 1 FROM artifact_heads WHERE community_id=$1 AND channel_id=$2) OR EXISTS(SELECT 1 FROM artifact_revisions WHERE community_id=$1 AND source_channel_id=$2))",
+            "UPDATE communities SET artifact_policy_modified_at=clock_timestamp() WHERE id=$1",
         )
-        .bind(community_id.as_uuid()).bind(channel_id)
+        .bind(community_id.as_uuid())
         .execute(tx.conn())
         .await?;
     }

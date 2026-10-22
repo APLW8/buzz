@@ -195,8 +195,8 @@ or remove. An empty delta does not confirm an accepted edit.
 ### Access recovery and bounds
 
 Relevant channel access changes atomically advance one community policy
-stamp. The check includes channels with current heads or retained move-source
-records. Ordinary artifact writes do not update this stamp. A different stamp
+stamp, including transitions on empty channels. Ordinary artifact writes do
+not update this stamp. A different stamp
 returns HTTP 409 `sync_reset` with `reason: "policy_changed"`, without naming
 private channels. A checkpoint older than 30 days returns the same code with
 `reason: "checkpoint_expired"`.

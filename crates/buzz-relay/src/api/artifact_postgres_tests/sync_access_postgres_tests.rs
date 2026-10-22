@@ -126,7 +126,7 @@ async fn sync_rejoin_replays_old_heads_without_resetting_on_task_edits() {
 
 #[tokio::test]
 #[ignore = "requires Postgres"]
-async fn sync_ignores_unrelated_ttl_and_unchanged_visibility() {
+async fn sync_ignores_unchanged_visibility_and_resets_on_ttl_changes() {
     let _guard = SERIAL.lock().await;
     let f = fixture().await;
     accept(&f, &f.revision(Uuid::new_v4(), "create", None)).await;
@@ -143,6 +143,8 @@ async fn sync_ignores_unrelated_ttl_and_unchanged_visibility() {
     )
     .await
     .unwrap();
+    let renamed = sync(&f, Some(&first["checkpoint"])).await;
+    assert!(renamed["checkpoint"].is_string());
     buzz_db::channel::update_channel(
         &f.pool,
         f.community,
@@ -154,7 +156,15 @@ async fn sync_ignores_unrelated_ttl_and_unchanged_visibility() {
     )
     .await
     .unwrap();
-    let next = sync(&f, Some(&first["checkpoint"])).await;
+    let (status, reset) = f
+        .request(
+            "/query",
+            json!([{"artifact":"sync","query":query(),"checkpoint":renamed["checkpoint"]}]),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(reset["reason"], "policy_changed");
+    let next = sync(&f, None).await;
     assert!(next["checkpoint"].is_string());
     accept(
         &f,
