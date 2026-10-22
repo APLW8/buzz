@@ -172,8 +172,8 @@ async fn legacy_fixture() -> (PgPool, Vec<LegacyInviteCase>) {
     let pool = PgPool::connect(&crate::test_support::database_url())
         .await
         .unwrap();
-    // Pinned main includes channel join roles in 0067; invitations expand in 0068.
-    crate::migration::run_migrations_through(&pool, 67)
+    // Pinned main includes entity deletion intake in 0068; invitations expand in 0069.
+    crate::migration::run_migrations_through(&pool, 68)
         .await
         .unwrap();
     let last_migration: i64 =
@@ -182,7 +182,7 @@ async fn legacy_fixture() -> (PgPool, Vec<LegacyInviteCase>) {
             .await
             .unwrap();
     assert_eq!(
-        last_migration, 67,
+        last_migration, 68,
         "fixtures start at the complete pinned-main schema"
     );
 
@@ -620,7 +620,7 @@ async fn migration_schema_backfill_repairs_retained_restrictions_and_ignores_aud
             .fetch_one(&pool)
             .await
             .unwrap(),
-        68
+        69
     );
     assert_admission_column(&pool).await;
     assert_join_role_preserved(&pool, cases[0].community).await;
@@ -777,7 +777,7 @@ async fn migration_schema_desired_pgschema_reconcile_matches_populated_upgrade()
     assert_eq!(before, cases.len() as i64);
 
     // Exercise the deployment path against populated data at the complete
-    // pinned-main schema through 0067, rather than reproducing its DDL by hand.
+    // pinned-main schema through 0068, rather than reproducing its DDL by hand.
     apply_pgschema_to_existing_database(&pool).await;
     assert_admission_column(&pool).await;
     assert_join_role_preserved(&pool, cases[0].community).await;

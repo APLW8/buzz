@@ -194,7 +194,7 @@ This change does not choose or deploy a cutoff.
 The historical maintenance companion must be separately reviewed and approved
 **before deploying this core change**. Both steps belong to the same controlled
 rollout: leaving unrepaired rows serving indefinitely would extend historical
-restriction rejection until their repair. Migration 0068 is schema-only: it adds
+restriction rejection until their repair. Migration 0069 is schema-only: it adds
 `revoked_at` and `legacy_admission` without rewriting existing invite rows.
 Reconcile any previously applied invitation migration version with the schema
 and migration history before applying it.
@@ -205,7 +205,7 @@ the drain/repair interval, including signed events, HTTP, administrative tools,
 background jobs and direct writers. If this cannot be enforced for every writer
 with existing operational controls, use a maintenance window: remove public
 traffic, stop all relay instances and other writers, drain in-flight work and
-verify no old writer remains. Keep them stopped while applying schema 0068 and
+verify no old writer remains. Keep them stopped while applying schema 0069 and
 running the separately approved repair with its isolated operator connection.
 Prepare only new-code instances; do not reopen traffic or restart other writers
 until repair validation succeeds. Readers that may run before repair must use
@@ -229,13 +229,13 @@ second run must keep zero and leave revocation timestamps and markers unchanged.
 Review fenced communities separately and keep their admission closed until they
 can be repaired under the same controls.
 
-Use a **fresh disposable database through migration 0067**, the complete
-pre-change schema including channel join roles, for upgrade testing. Do not reuse
+Use a **fresh disposable database through migration 0068**, the complete
+pre-change schema including channel join roles and entity deletion intake, for upgrade testing. Do not reuse
 an older database that applied the invitation migration numbered 0067 or a
-different 0068 checksum; reconcile it separately without resetting a user's
+different 0068/0069 checksum; reconcile it separately without resetting a user's
 database. Seed legacy links for a restricted issuer and an unrelated issuer;
 lift the first restriction before
-upgrade. Apply schema-only 0068 and confirm it rewrites no invite rows. Before
+upgrade. Apply schema-only 0069 and confirm it rewrites no invite rows. Before
 repair, signed claims reject historical legacy candidates lazily. Run the actual
 repair script twice, checking selective revocation, cleared markers, zero
 remaining active-community legacy rows and idempotence. The populated automated
