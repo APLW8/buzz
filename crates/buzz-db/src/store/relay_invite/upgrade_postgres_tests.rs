@@ -170,8 +170,8 @@ async fn legacy_fixture() -> (PgPool, Vec<LegacyInviteCase>) {
     let pool = PgPool::connect(&crate::test_support::database_url())
         .await
         .unwrap();
-    // Pinned main ends at migration 0066, so 0067 is the first candidate migration.
-    crate::migration::run_migrations_through(&pool, 66)
+    // Pinned main includes channel join roles in 0067; invitations expand in 0068.
+    crate::migration::run_migrations_through(&pool, 67)
         .await
         .unwrap();
     let last_migration: i64 =
@@ -180,7 +180,7 @@ async fn legacy_fixture() -> (PgPool, Vec<LegacyInviteCase>) {
             .await
             .unwrap();
     assert_eq!(
-        last_migration, 66,
+        last_migration, 67,
         "fixtures start at the complete pinned-main schema"
     );
 
@@ -336,7 +336,45 @@ async fn legacy_fixture() -> (PgPool, Vec<LegacyInviteCase>) {
 
         cases.push(LegacyInviteCase { community });
     }
+    // Preserve a populated, non-default join role across both upgrade paths.
+    sqlx::query(
+        "INSERT INTO channels (community_id, name, created_by, join_role) \
+         VALUES ($1, 'upgrade-guest', $2, 'guest')",
+    )
+    .bind(cases[0].community)
+    .bind(issuer.as_slice())
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_join_role_preserved(&pool, cases[0].community).await;
     (pool, cases)
+}
+
+async fn assert_join_role_preserved(pool: &PgPool, community: Uuid) {
+    let column: (String, String, Option<String>) = sqlx::query_as(
+        "SELECT data_type, is_nullable, column_default \
+         FROM information_schema.columns \
+         WHERE table_schema = 'public' AND table_name = 'channels' \
+           AND column_name = 'join_role'",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        column,
+        ("text".into(), "NO".into(), Some("'member'::text".into()))
+    );
+    let join_role: String = sqlx::query_scalar(
+        "SELECT join_role FROM channels WHERE community_id = $1 AND name = 'upgrade-guest'",
+    )
+    .bind(community)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        join_role, "guest",
+        "upgrading must preserve channel admission policy"
+    );
 }
 
 async fn invite_revocation_state(pool: &PgPool) -> Vec<(Uuid, Option<DateTime<Utc>>, bool)> {
@@ -462,10 +500,18 @@ async fn apply_pgschema_to_existing_database(pool: &PgPool) {
 
 #[tokio::test]
 #[ignore = "requires Postgres"]
-async fn migration_schema_0067_adds_invite_columns_without_rewriting_history() {
+async fn migration_schema_0068_adds_invite_columns_without_rewriting_history() {
     let (pool, cases) = legacy_fixture().await;
     crate::migration::run_migrations(&pool).await.unwrap();
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT max(version) FROM _sqlx_migrations WHERE success")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        68
+    );
     assert_admission_column(&pool).await;
+    assert_join_role_preserved(&pool, cases[0].community).await;
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
             "SELECT count(*) FROM relay_invites WHERE revoked_at IS NOT NULL"
@@ -588,9 +634,10 @@ async fn migration_schema_desired_pgschema_reconcile_matches_populated_upgrade()
     assert_eq!(before, cases.len() as i64);
 
     // Exercise the deployment path against populated data at the complete
-    // pinned-main schema through 0066, rather than reproducing its DDL by hand.
+    // pinned-main schema through 0067, rather than reproducing its DDL by hand.
     apply_pgschema_to_existing_database(&pool).await;
     assert_admission_column(&pool).await;
+    assert_join_role_preserved(&pool, cases[0].community).await;
     let before_reconcile: i64 =
         sqlx::query_scalar("SELECT count(*) FROM relay_invites WHERE revoked_at IS NOT NULL")
             .fetch_one(&pool)
@@ -609,6 +656,7 @@ async fn migration_schema_desired_pgschema_reconcile_matches_populated_upgrade()
     // rewritten by the desired-state path.
     sqlx::raw_sql(reconcile).execute(&pool).await.unwrap();
     assert_eq!(invite_revocation_state(&pool).await, before_reconcile);
+    assert_join_role_preserved(&pool, cases[0].community).await;
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
             "SELECT count(*) FROM relay_invites WHERE legacy_admission IS DISTINCT FROM true"
