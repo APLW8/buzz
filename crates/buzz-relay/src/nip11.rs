@@ -387,8 +387,8 @@ pub(crate) async fn nip11_document(state: &crate::state::AppState, raw_host: &st
         admin_api.as_deref(),
         state.config.klipy.as_ref().map(|_| "klipy"),
     );
-    if state.config.artifact_sync_enabled {
-        info.artifacts["sync"] = crate::api::artifact_sync::capability();
+    if state.config.artifact_incremental_enabled {
+        info.artifacts["incremental"] = crate::api::artifact_sync::capability();
     }
     if let Ok(tenant) = crate::tenant::bind_community(&state.db, raw_host).await {
         if state.config.buzz_v1_enabled {

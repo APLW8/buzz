@@ -12,7 +12,7 @@ mod scale_postgres_tests;
 async fn fixture() -> Fixture {
     let mut f = Fixture::new().await;
     let mut state = (*f.state).clone();
-    Arc::make_mut(&mut state.config).artifact_sync_enabled = true;
+    Arc::make_mut(&mut state.config).artifact_incremental_enabled = true;
     f.state = Arc::new(state);
     f
 }
@@ -22,7 +22,7 @@ fn query() -> Value {
     json!({"artifact":"current","#type":["buzz.task"]})
 }
 async fn sync(f: &Fixture, checkpoint: Option<&Value>) -> Value {
-    let mut request = json!({"artifact":"sync","query":query()});
+    let mut request = json!({"artifact":"incremental","query":query()});
     if let Some(checkpoint) = checkpoint {
         request["checkpoint"] = checkpoint.clone();
     }
@@ -103,7 +103,7 @@ async fn sync_pages_equal_timestamps_and_replays_the_same_cursor() {
     let first = sync(&f, None).await;
     assert_eq!(first["changes"].as_array().unwrap().len(), 100);
     assert!(first["checkpoint"].is_null());
-    let request = json!([{"artifact":"sync","query":query(),"cursor":first["nextCursor"]}]);
+    let request = json!([{"artifact":"incremental","query":query(),"cursor":first["nextCursor"]}]);
     let (status, last) = f.request("/query", request.clone()).await;
     assert!(status.is_success(), "{status}: {last}");
     assert_eq!(last["changes"].as_array().unwrap().len(), 3);
@@ -130,7 +130,7 @@ async fn sync_current_has_uniform_unavailable_and_rejects_duplicate_ids() {
     let event = f.revision_as(&f.owner, f.private, id, "create", None);
     accept(&f, &event).await;
     let missing = Uuid::new_v4();
-    let body = json!([{"artifact":"sync","action":"current","query":query(),"artifactIds":[id,missing,"local-only"]}]);
+    let body = json!([{"artifact":"incremental","action":"current","query":query(),"artifactIds":[id,missing,"local-only"]}]);
     let (status, body) = f.request_as(&f.peer, "/query", body).await;
     assert!(status.is_success(), "{status}: {body}");
     assert_eq!(
@@ -142,14 +142,14 @@ async fn sync_current_has_uniform_unavailable_and_rejects_duplicate_ids() {
     let (status, _) = f
         .request(
             "/query",
-            json!([{"artifact":"sync","action":"current","query":query(),"artifactIds":[id,id]}]),
+            json!([{"artifact":"incremental","action":"current","query":query(),"artifactIds":[id,id]}]),
         )
         .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     let (status, body) = f
         .request(
             "/query",
-            json!([{"artifact":"sync","action":"current","query":query(),"artifactIds":[id]}]),
+            json!([{"artifact":"incremental","action":"current","query":query(),"artifactIds":[id]}]),
         )
         .await;
     assert!(status.is_success(), "{status}: {body}");
@@ -173,7 +173,7 @@ async fn sync_grant_finds_old_heads_and_removal_names_only_own_membership() {
         .request_as(
             &f.peer,
             "/query",
-            json!([{"artifact":"sync","query":query()}]),
+            json!([{"artifact":"incremental","query":query()}]),
         )
         .await;
     assert_eq!(first["changes"], json!([]));
@@ -191,7 +191,7 @@ async fn sync_grant_finds_old_heads_and_removal_names_only_own_membership() {
         .request_as(
             &f.peer,
             "/query",
-            json!([{"artifact":"sync","query":query(),"checkpoint":first["checkpoint"]}]),
+            json!([{"artifact":"incremental","query":query(),"checkpoint":first["checkpoint"]}]),
         )
         .await;
     assert!(
@@ -215,7 +215,7 @@ async fn sync_grant_finds_old_heads_and_removal_names_only_own_membership() {
         .request_as(
             &f.peer,
             "/query",
-            json!([{"artifact":"sync","query":query(),"checkpoint":granted["checkpoint"]}]),
+            json!([{"artifact":"incremental","query":query(),"checkpoint":granted["checkpoint"]}]),
         )
         .await;
     assert_eq!(
@@ -236,7 +236,7 @@ async fn sync_move_to_hidden_destination_removes_the_source_view() {
         .request_as(
             &f.peer,
             "/query",
-            json!([{"artifact":"sync","query":query()}]),
+            json!([{"artifact":"incremental","query":query()}]),
         )
         .await;
     let moved = f.revision_as(&f.owner, f.private, id, "move", Some(&first));
@@ -245,7 +245,7 @@ async fn sync_move_to_hidden_destination_removes_the_source_view() {
         .request_as(
             &f.peer,
             "/query",
-            json!([{"artifact":"sync","query":query(),"checkpoint":read["checkpoint"]}]),
+            json!([{"artifact":"incremental","query":query(),"checkpoint":read["checkpoint"]}]),
         )
         .await;
     assert_eq!(
@@ -279,13 +279,13 @@ async fn sync_policy_changes_reset_without_hidden_channel_ids() {
     let (status, body) = f
         .request(
             "/query",
-            json!([{"artifact":"sync","query":query(),"cursor":first["nextCursor"]}]),
+            json!([{"artifact":"incremental","query":query(),"cursor":first["nextCursor"]}]),
         )
         .await;
     assert_eq!(status, StatusCode::CONFLICT);
     assert_eq!(
         body,
-        json!({"code":"sync_reset","error":"sync_reset","reason":"policy_changed"})
+        json!({"code":"incremental_reset","error":"incremental_reset","reason":"policy_changed"})
     );
 }
 
@@ -306,7 +306,7 @@ async fn sync_progress_binds_reader_query_and_community() {
             .request_as(
                 reader,
                 "/query",
-                json!([{"artifact":"sync","query":scope,"checkpoint":first["checkpoint"]}]),
+                json!([{"artifact":"incremental","query":scope,"checkpoint":first["checkpoint"]}]),
             )
             .await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
@@ -317,7 +317,7 @@ async fn sync_progress_binds_reader_query_and_community() {
         .request_as(
             &f.owner,
             "/query",
-            json!([{"artifact":"sync","query":query(),"checkpoint":first["checkpoint"]}]),
+            json!([{"artifact":"incremental","query":query(),"checkpoint":first["checkpoint"]}]),
         )
         .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
@@ -329,7 +329,7 @@ async fn sync_progress_binds_reader_query_and_community() {
     let (status, body) = f
         .request(
             "/query",
-            json!([{"artifact":"sync","query":query(),"checkpoint":expired}]),
+            json!([{"artifact":"incremental","query":query(),"checkpoint":expired}]),
         )
         .await;
     assert_eq!(status, StatusCode::CONFLICT);

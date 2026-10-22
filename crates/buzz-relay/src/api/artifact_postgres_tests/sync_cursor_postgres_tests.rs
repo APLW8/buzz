@@ -9,7 +9,7 @@ async fn sync_move_cursor_hides_private_and_redacted_revision_ids() {
         .request_as(
             &f.peer,
             "/query",
-            json!([{"artifact":"sync","query":query()}]),
+            json!([{"artifact":"incremental","query":query()}]),
         )
         .await;
     let mut current = std::collections::HashMap::new();
@@ -45,7 +45,7 @@ async fn sync_move_cursor_hides_private_and_redacted_revision_ids() {
             .request_as(
                 &f.peer,
                 "/query",
-                json!([{"artifact":"sync","query":query(),"checkpoint":empty["checkpoint"]}]),
+                json!([{"artifact":"incremental","query":query(),"checkpoint":empty["checkpoint"]}]),
             )
             .await;
         assert!(status.is_success(), "{status}: {first}");
@@ -66,7 +66,7 @@ async fn sync_move_cursor_hides_private_and_redacted_revision_ids() {
             .request_as(
                 &f.peer,
                 "/query",
-                json!([{"artifact":"sync","query":query(),"cursor":cursor}]),
+                json!([{"artifact":"incremental","query":query(),"cursor":cursor}]),
             )
             .await;
         assert!(status.is_success(), "{status}: {last}");

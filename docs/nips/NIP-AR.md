@@ -107,16 +107,20 @@ Clients validate content before interpreting it as a known type. Unknown types o
 
 Artifact text is untrusted. A type name, relationship tag, or payload cannot authorize a privileged action. Moving, deleting, or revoking access cannot erase copies already downloaded.
 
-## Incremental sync
+## Incremental reads
 
-The relay advertises `artifacts.sync` when incremental reads are enabled.
+Incremental reads maintain an eventually consistent local store. They do not prove a complete set at one database snapshot. Absence from a page never proves deletion or loss of access.
+
+This HTTP protocol uses `artifacts.incremental`. The WebSocket Sync subscription uses a separate `artifacts.sync` capability and defines its own complete-set guarantee. Clients select each protocol through its own capability.
+
+The relay advertises `artifacts.incremental` when incremental reads are enabled.
 Each signed `POST /query` request contains one filter. The query uses the
 same community, relay admission, channel access, and exact tag rules as an
 ordinary artifact read. The existing `current` and `history` array responses
 keep their format.
 
 ```json
-[{"artifact":"sync","query":{"artifact":"current","#type":["buzz.task"]}}]
+[{"artifact":"incremental","query":{"artifact":"current","#type":["buzz.task"]}}]
 ```
 
 The initial read pages through current identities. A later read supplies the
@@ -176,14 +180,14 @@ current revalidation result without destination metadata.
 ### Current reads and write confirmation
 
 ```json
-[{"artifact":"sync","action":"current","query":{"artifact":"current","#type":["buzz.task"]},"artifactIds":["22222222-2222-4222-8222-222222222222"]}]
+[{"artifact":"incremental","action":"current","query":{"artifact":"current","#type":["buzz.task"]},"artifactIds":["22222222-2222-4222-8222-222222222222"]}]
 ```
 
 The response has `version`, database `startedAt`, and `changes`. It contains
 exactly one upsert or remove for each requested ID, in request order.
 The request permits 1–100 unique nonempty strings, each at most 256 UTF-8
 bytes. A string that is not a canonical artifact UUID returns remove.
-Duplicates and invalid bounds fail with `sync_invalid`. The server does not
+Duplicates and invalid bounds fail with `incremental_invalid`. The server does not
 truncate the request.
 
 Clients serialize a full delta pass and its commits before a current-ID read.
@@ -197,7 +201,7 @@ or remove. An empty delta does not confirm an accepted edit.
 Relevant channel access changes atomically advance one community policy
 stamp, including transitions on empty channels. Ordinary artifact writes do
 not update this stamp. A different stamp
-returns HTTP 409 `sync_reset` with `reason: "policy_changed"`, without naming
+returns HTTP 409 `incremental_reset` with `reason: "policy_changed"`, without naming
 private channels. A checkpoint older than 30 days returns the same code with
 `reason: "checkpoint_expired"`.
 
@@ -219,18 +223,18 @@ NIP-11 advertises:
 ```
 
 Pages shrink to the response byte bound. A single oversized result returns
-HTTP 413 `sync_limit`. A current-ID batch can return that error; the client
+HTTP 413 `incremental_limit`. A current-ID batch can return that error; the client
 can split the batch. No page or batch silently truncates its result. The
 server permits four concurrent operations per process, a two-second SQL
 statement budget, and an eight-second operation budget. There is no
 identity-wide membership count limit on this path.
 
 Only matching readable artifacts in permanent channels are supported.
-A matching TTL artifact returns HTTP 422 `sync_unsupported_scope`. An
-unrelated TTL channel does not block task sync. HTTP 400 `sync_invalid`
-rejects invalid requests or tokens. HTTP 503 `sync_unavailable` reports a
+A matching TTL artifact returns HTTP 422 `incremental_unsupported_scope`. An
+unrelated TTL channel does not block incremental task reads. HTTP 400 `incremental_invalid`
+rejects invalid requests or tokens. HTTP 503 `incremental_unavailable` reports a
 service or work-budget failure. These failures do not advance progress.
 
-The rollout gate is `BUZZ_ARTIFACT_SYNC_ENABLED`, off by default. Follow
+The rollout gate is `BUZZ_ARTIFACT_INCREMENTAL_ENABLED`, off by default. Follow
 [artifact-sync-deployment.md](../artifact-sync-deployment.md) before enabling
-it. Sync completion does not establish a live subscription to every channel.
+it. Incremental completion does not establish a live subscription to every channel.

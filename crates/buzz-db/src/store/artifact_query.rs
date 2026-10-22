@@ -55,7 +55,7 @@ impl Db {
     }
 }
 
-/// Apply the same visibility and tag rules to pages and snapshot capture.
+/// Own the visibility and tag rules for artifact queries and current-ID reads.
 pub(super) fn predicates(
     qb: &mut QueryBuilder<sqlx::Postgres>,
     community: CommunityId,

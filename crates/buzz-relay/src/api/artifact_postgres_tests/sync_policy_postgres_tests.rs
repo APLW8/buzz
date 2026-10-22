@@ -2,7 +2,7 @@ use super::*;
 
 #[tokio::test]
 #[ignore = "requires Postgres"]
-async fn sync_resets_for_first_artifact_during_channel_transition() {
+async fn incremental_resets_for_first_artifact_during_channel_transition() {
     let _guard = SERIAL.lock().await;
     for delete_channel in [false, true] {
         let f = fixture().await;
@@ -58,7 +58,7 @@ async fn sync_resets_for_first_artifact_during_channel_transition() {
             .request_as(
                 &f.peer,
                 "/query",
-                json!([{"artifact":"sync","query":query()}]),
+                json!([{"artifact":"incremental","query":query()}]),
             )
             .await;
         assert!(status.is_success(), "{status}: {first}");
@@ -69,7 +69,7 @@ async fn sync_resets_for_first_artifact_during_channel_transition() {
             .request_as(
                 &f.peer,
                 "/query",
-                json!([{"artifact":"sync","query":query(),"checkpoint":first["checkpoint"]}]),
+                json!([{"artifact":"incremental","query":query(),"checkpoint":first["checkpoint"]}]),
             )
             .await;
         assert_eq!(status, StatusCode::CONFLICT);

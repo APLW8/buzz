@@ -46,7 +46,7 @@ async fn sync_downloads_ten_thousand_tasks_with_sixty_thousand_memberships() {
     let mut other = (*bridge_handler_test_state().await.unwrap()).clone();
     let config = Arc::make_mut(&mut other.config);
     config.require_auth_token = true;
-    config.artifact_sync_enabled = true;
+    config.artifact_incremental_enabled = true;
     other.relay_keypair = f.state.relay_keypair.clone();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}/query", listener.local_addr().unwrap());
@@ -73,7 +73,7 @@ async fn sync_downloads_ten_thousand_tasks_with_sixty_thousand_memberships() {
             &f,
             &client,
             &url,
-            json!([{"artifact":"sync","query":query(),"cursor":page["nextCursor"]}]),
+            json!([{"artifact":"incremental","query":query(),"cursor":page["nextCursor"]}]),
         )
         .await;
         assert!(status.is_success(), "{status}: {next}");
@@ -87,7 +87,7 @@ async fn sync_downloads_ten_thousand_tasks_with_sixty_thousand_memberships() {
         &f,
         &client,
         &url,
-        json!([{"artifact":"sync","query":query(),"checkpoint":page["checkpoint"]}]),
+        json!([{"artifact":"incremental","query":query(),"checkpoint":page["checkpoint"]}]),
     )
     .await;
     assert!(status.is_success(), "{status}: {delta}");

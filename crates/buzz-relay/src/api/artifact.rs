@@ -47,9 +47,12 @@ async fn execute(
             "artifact queries require exactly one filter",
         ));
     }
-    if filters[0].get("artifact").and_then(Value::as_str) == Some("sync") {
+    if filters[0].get("artifact").and_then(Value::as_str) == Some("incremental") {
         if count {
-            return Err(api_error(StatusCode::BAD_REQUEST, "sync requires /query"));
+            return Err(api_error(
+                StatusCode::BAD_REQUEST,
+                "incremental requires /query",
+            ));
         }
         return super::artifact_sync::query(state, tenant, reader, &filters[0]).await;
     }

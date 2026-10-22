@@ -20,7 +20,7 @@ async fn sync_redaction_and_query_exit_return_removals() {
     accept(&f, &first).await;
     let scope = json!({"artifact":"current","#type":["buzz.task"],"#project":["alpha"]});
     let (_, page) = f
-        .request("/query", json!([{"artifact":"sync","query":scope}]))
+        .request("/query", json!([{"artifact":"incremental","query":scope}]))
         .await;
     assert_eq!(page["changes"][0]["type"], "upsert");
     let changed = f.revision(id, "update", Some(&first));
@@ -28,7 +28,7 @@ async fn sync_redaction_and_query_exit_return_removals() {
     let (status, delta) = f
         .request(
             "/query",
-            json!([{"artifact":"sync","query":scope,"checkpoint":page["checkpoint"]}]),
+            json!([{"artifact":"incremental","query":scope,"checkpoint":page["checkpoint"]}]),
         )
         .await;
     assert!(status.is_success(), "{status}: {delta}");
@@ -80,7 +80,7 @@ async fn sync_rejoin_replays_old_heads_without_resetting_on_task_edits() {
         .request_as(
             &f.peer,
             "/query",
-            json!([{"artifact":"sync","query":query()}]),
+            json!([{"artifact":"incremental","query":query()}]),
         )
         .await;
     buzz_db::channel_members::remove_member(
@@ -106,7 +106,7 @@ async fn sync_rejoin_replays_old_heads_without_resetting_on_task_edits() {
         .request_as(
             &f.peer,
             "/query",
-            json!([{"artifact":"sync","query":query(),"checkpoint":page["checkpoint"]}]),
+            json!([{"artifact":"incremental","query":query(),"checkpoint":page["checkpoint"]}]),
         )
         .await;
     assert!(status.is_success(), "{status}: {delta}");
@@ -117,7 +117,7 @@ async fn sync_rejoin_replays_old_heads_without_resetting_on_task_edits() {
         .request_as(
             &f.peer,
             "/query",
-            json!([{"artifact":"sync","query":query(),"checkpoint":delta["checkpoint"]}]),
+            json!([{"artifact":"incremental","query":query(),"checkpoint":delta["checkpoint"]}]),
         )
         .await;
     assert!(status.is_success(), "{status}: {delta}");
@@ -159,7 +159,7 @@ async fn sync_ignores_unchanged_visibility_and_resets_on_ttl_changes() {
     let (status, reset) = f
         .request(
             "/query",
-            json!([{"artifact":"sync","query":query(),"checkpoint":renamed["checkpoint"]}]),
+            json!([{"artifact":"incremental","query":query(),"checkpoint":renamed["checkpoint"]}]),
         )
         .await;
     assert_eq!(status, StatusCode::CONFLICT);
@@ -172,10 +172,13 @@ async fn sync_ignores_unchanged_visibility_and_resets_on_ttl_changes() {
     )
     .await;
     let (status, body) = f
-        .request("/query", json!([{"artifact":"sync","query":query()}]))
+        .request(
+            "/query",
+            json!([{"artifact":"incremental","query":query()}]),
+        )
         .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
-    assert_eq!(body["code"], "sync_unsupported_scope");
+    assert_eq!(body["code"], "incremental_unsupported_scope");
 }
 
 #[tokio::test]
@@ -200,7 +203,7 @@ async fn sync_shrinks_large_pages_and_current_batches_fail_explicitly() {
     let (status, last) = f
         .request(
             "/query",
-            json!([{"artifact":"sync","query":query(),"cursor":first["nextCursor"]}]),
+            json!([{"artifact":"incremental","query":query(),"cursor":first["nextCursor"]}]),
         )
         .await;
     assert!(status.is_success(), "{status}: {last}");
@@ -209,11 +212,11 @@ async fn sync_shrinks_large_pages_and_current_batches_fail_explicitly() {
     let (status, body) = f
         .request(
             "/query",
-            json!([{"artifact":"sync","action":"current","query":query(),"artifactIds":ids}]),
+            json!([{"artifact":"incremental","action":"current","query":query(),"artifactIds":ids}]),
         )
         .await;
     assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
-    assert_eq!(body["code"], "sync_limit");
+    assert_eq!(body["code"], "incremental_limit");
 }
 
 #[tokio::test]
@@ -222,8 +225,10 @@ async fn sync_gate_controls_http_reads_and_capability() {
     use tower::ServiceExt;
     let _guard = SERIAL.lock().await;
     let mut f = fixture().await;
+    let mut websocket_sync = Value::Null;
     for enabled in [false, true] {
-        Arc::make_mut(&mut Arc::make_mut(&mut f.state).config).artifact_sync_enabled = enabled;
+        Arc::make_mut(&mut Arc::make_mut(&mut f.state).config).artifact_incremental_enabled =
+            enabled;
         let response = crate::router::build_router(f.state.clone())
             .oneshot(
                 axum::http::Request::builder()
@@ -240,17 +245,22 @@ async fn sync_gate_controls_http_reads_and_capability() {
             .unwrap();
         let info: Value = serde_json::from_slice(&bytes).unwrap();
         if enabled {
+            assert_eq!(info["artifacts"]["sync"], websocket_sync);
             assert_eq!(
-                info["artifacts"]["sync"],
+                info["artifacts"]["incremental"],
                 json!({"version":1,"overlapSeconds":120,
                 "pageRows":100,"currentRows":100,"responseBytes":8388608,
                 "permanentChannelsOnly":true,"checkpointLifetimeSeconds":2592000})
             );
         } else {
-            assert!(info["artifacts"].get("sync").is_none());
+            websocket_sync = info["artifacts"]["sync"].clone();
+            assert!(info["artifacts"].get("incremental").is_none());
         }
         let (status, _) = f
-            .request("/query", json!([{"artifact":"sync","query":query()}]))
+            .request(
+                "/query",
+                json!([{"artifact":"incremental","query":query()}]),
+            )
             .await;
         assert_eq!(
             status,
@@ -265,7 +275,7 @@ async fn sync_gate_controls_http_reads_and_capability() {
 
 #[tokio::test]
 #[ignore = "requires Postgres"]
-async fn sync_resets_when_a_move_source_loses_access() {
+async fn incremental_resets_when_a_move_source_loses_access() {
     let _guard = SERIAL.lock().await;
     for delete_channel in [false, true] {
         let f = fixture().await;
@@ -276,7 +286,7 @@ async fn sync_resets_when_a_move_source_loses_access() {
             .request_as(
                 &f.peer,
                 "/query",
-                json!([{"artifact":"sync","query":query()}]),
+                json!([{"artifact":"incremental","query":query()}]),
             )
             .await;
         let moved = f.revision_as(&f.owner, f.private, id, "move", Some(&first));
@@ -313,7 +323,7 @@ async fn sync_resets_when_a_move_source_loses_access() {
             .request_as(
                 &f.peer,
                 "/query",
-                json!([{"artifact":"sync","query":query(),"checkpoint":read["checkpoint"]}]),
+                json!([{"artifact":"incremental","query":query(),"checkpoint":read["checkpoint"]}]),
             )
             .await;
         assert_eq!(status, StatusCode::CONFLICT);
@@ -323,7 +333,7 @@ async fn sync_resets_when_a_move_source_loses_access() {
             .request_as(
                 &f.peer,
                 "/query",
-                json!([{"artifact":"sync","action":"current","query":query(),"artifactIds":[id]}]),
+                json!([{"artifact":"incremental","action":"current","query":query(),"artifactIds":[id]}]),
             )
             .await;
         assert!(status.is_success());
@@ -371,14 +381,14 @@ async fn sync_progress_replays_queries_with_escaped_values() {
     let f = fixture().await;
     let scope = json!({"artifact":"current","#type":["buzz.task"],"#project":vec!["\u{1}".repeat(4096);15]});
     let (status, first) = f
-        .request("/query", json!([{"artifact":"sync","query":scope}]))
+        .request("/query", json!([{"artifact":"incremental","query":scope}]))
         .await;
     assert!(status.is_success(), "{status}: {first}");
     assert!(first["checkpoint"].as_str().unwrap().len() < 200_000);
     let (status, next) = f
         .request(
             "/query",
-            json!([{"artifact":"sync","query":scope,"checkpoint":first["checkpoint"]}]),
+            json!([{"artifact":"incremental","query":scope,"checkpoint":first["checkpoint"]}]),
         )
         .await;
     assert!(status.is_success(), "{status}: {next}");
@@ -398,7 +408,7 @@ async fn sync_current_intersects_known_ids_with_query_scope() {
     let (status, body) = f
         .request(
             "/query",
-            json!([{"artifact":"sync","action":"current",
+            json!([{"artifact":"incremental","action":"current",
                 "query":{"artifact":"current","#type":["buzz.task"],"#d":[included]},
                 "artifactIds":[included,excluded]}]),
         )

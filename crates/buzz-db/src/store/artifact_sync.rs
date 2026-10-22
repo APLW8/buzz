@@ -167,6 +167,8 @@ impl Db {
     }
 }
 
+// Keep candidate access rules aligned with artifact_query::predicates, which owns
+// current-state visibility. This query also reads retained move and membership rows.
 const CANDIDATES: &str = r#"
 WITH readable AS NOT MATERIALIZED (
     SELECT c.id FROM channels c

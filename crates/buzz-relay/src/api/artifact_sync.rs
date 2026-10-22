@@ -1,4 +1,4 @@
-//! Timestamp sync with signed progress and bounded current-identity reads.
+//! Incremental reads with signed progress and bounded current-identity reads.
 use crate::state::AppState;
 use axum::{http::StatusCode, Json};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
@@ -53,28 +53,29 @@ fn error(status: StatusCode, code: &str) -> (StatusCode, Json<Value>) {
     (status, Json(json!({"error":code,"code":code})))
 }
 fn invalid() -> (StatusCode, Json<Value>) {
-    error(StatusCode::BAD_REQUEST, "sync_invalid")
+    error(StatusCode::BAD_REQUEST, "incremental_invalid")
 }
 fn unavailable() -> (StatusCode, Json<Value>) {
-    error(StatusCode::SERVICE_UNAVAILABLE, "sync_unavailable")
+    error(StatusCode::SERVICE_UNAVAILABLE, "incremental_unavailable")
 }
 fn limit() -> (StatusCode, Json<Value>) {
-    error(StatusCode::PAYLOAD_TOO_LARGE, "sync_limit")
+    error(StatusCode::PAYLOAD_TOO_LARGE, "incremental_limit")
 }
 fn reset(reason: &str) -> (StatusCode, Json<Value>) {
     (
         StatusCode::CONFLICT,
-        Json(json!({"error":"sync_reset","code":"sync_reset","reason":reason})),
+        Json(json!({"error":"incremental_reset","code":"incremental_reset","reason":reason})),
     )
 }
 fn db_error(e: buzz_db::DbError) -> (StatusCode, Json<Value>) {
     match e {
         buzz_db::DbError::ArtifactSyncLimit => limit(),
-        buzz_db::DbError::ArtifactSyncUnsupportedScope => {
-            error(StatusCode::UNPROCESSABLE_ENTITY, "sync_unsupported_scope")
-        }
+        buzz_db::DbError::ArtifactSyncUnsupportedScope => error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "incremental_unsupported_scope",
+        ),
         error => {
-            tracing::warn!(%error,"artifact sync database read failed");
+            tracing::warn!(%error,"incremental artifact read failed");
             unavailable()
         }
     }
@@ -89,7 +90,7 @@ pub(crate) fn capability() -> Value {
 
 fn mac(state: &AppState) -> Result<Hmac<Sha256>, (StatusCode, Json<Value>)> {
     let mut digest = Sha256::new();
-    digest.update(b"buzz-artifact-sync-v1\0");
+    digest.update(b"buzz-artifact-incremental-v1\0");
     digest.update(state.relay_keypair.secret_key().as_secret_bytes());
     Hmac::<Sha256>::new_from_slice(&digest.finalize()).map_err(|_| unavailable())
 }
@@ -120,7 +121,7 @@ fn decode(state: &AppState, value: &str) -> Result<Token, (StatusCode, Json<Valu
     serde_json::from_slice(&data).map_err(|_| invalid())
 }
 
-/// Execute one sync operation without a manifest or server-side cursor state.
+/// Execute one incremental read without a manifest or server-side cursor state.
 #[tracing::instrument(skip_all, fields(community_id = %tenant.community(), reader = %reader))]
 pub(super) async fn query(
     state: &Arc<AppState>,
@@ -128,7 +129,7 @@ pub(super) async fn query(
     reader: &nostr::PublicKey,
     filter: &Value,
 ) -> Response {
-    if !state.config.artifact_sync_enabled {
+    if !state.config.artifact_incremental_enabled {
         return Err(unavailable());
     }
     let _permit = WORK.try_acquire().map_err(|_| unavailable())?;
@@ -147,7 +148,7 @@ async fn execute(
     filter: &Value,
 ) -> Response {
     let request: Request = serde_json::from_value(filter.clone()).map_err(|_| invalid())?;
-    if request.artifact != "sync"
+    if request.artifact != "incremental"
         || request.query.get("limit").is_some()
         || request.query.get("offset").is_some()
     {

@@ -1,7 +1,7 @@
-# Artifact sync deployment
+# Incremental artifact reads deployment
 
-Incremental artifact sync uses a 120-second overlap and database modification
-timestamps. `BUZZ_ARTIFACT_SYNC_ENABLED` is off by default. Enable it only
+Incremental artifact reads use a 120-second overlap and database modification
+timestamps. `BUZZ_ARTIFACT_INCREMENTAL_ENABLED` is off by default. Enable it only
 after the schema, indexes, and every serving writer are upgraded.
 
 ## Schema and indexes
@@ -54,8 +54,8 @@ migration ledger.
 Deploy the timestamp writers to every relay instance with the gate off.
 Drain the old writers. All instances must use the same configured relay
 signing key, because that key authenticates the progress tokens. Then enable
-`BUZZ_ARTIFACT_SYNC_ENABLED=true` on the serving fleet. NIP-11 advertises
-`artifacts.sync` only when the gate is enabled. The endpoint refuses sync
+`BUZZ_ARTIFACT_INCREMENTAL_ENABLED=true` on the serving fleet. NIP-11 advertises
+`artifacts.incremental` only when the gate is enabled. The endpoint refuses incremental
 requests while the gate is off.
 
 Before a rollback to an old writer, disable the gate on every serving
