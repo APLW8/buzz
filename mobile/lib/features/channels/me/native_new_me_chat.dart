@@ -78,21 +78,12 @@ Future<(Channel, String)?> _showNewMeChat(
                   {
                     'id': agent.pubkey,
                     'name': agent.displayName ?? 'Agent',
-                    'artworkScale':
-                        usesInsetAgentArtwork(
-                          ref
-                              .read(userCacheProvider.notifier)
-                              .get(agent.pubkey)
-                              ?.avatarUrl,
-                        )
+                    // The native sheet takes a snapshot and cannot observe a
+                    // later cache fill. Use the profile we just verified.
+                    'artworkScale': usesInsetAgentArtwork(agent.avatarUrl)
                         ? '$animatedAvatarArtworkScale'
                         : '1',
-                    'avatarUrl':
-                        ref
-                            .read(userCacheProvider.notifier)
-                            .get(agent.pubkey)
-                            ?.avatarUrl ??
-                        '',
+                    'avatarUrl': agent.avatarUrl ?? '',
                   },
               ],
             });

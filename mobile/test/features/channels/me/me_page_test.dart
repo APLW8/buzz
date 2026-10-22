@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:buzz/shared/mentions/agent_identity_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:buzz/shared/me/me_chat_creation.dart';
@@ -164,10 +165,20 @@ void main() {
         await tester.pumpAndSettle();
       }
       // Desktop publishes an agent while the mobile session stays connected.
-      directory = const [
-        AgentDirectoryEntry(
-          pubkey: 'new-agent',
-          displayName: 'New desktop agent',
+      directory = [
+        AgentDirectoryEntry.fromEvent(
+          NostrEvent(
+            id: 'new-profile',
+            pubkey: 'new-agent',
+            createdAt: 1,
+            kind: 0,
+            tags: const [],
+            sig: '',
+            content: jsonEncode({
+              'name': 'New desktop agent',
+              'picture': 'https://example.com/fishy.png',
+            }),
+          ),
         ),
       ];
       action.value!();
@@ -178,6 +189,10 @@ void main() {
         expect(
           (presentations.last['assistants'] as List).single,
           containsPair('name', 'New desktop agent'),
+        );
+        expect(
+          (presentations.last['assistants'] as List).single,
+          containsPair('avatarUrl', 'https://example.com/fishy.png'),
         );
       } else {
         await tester.tap(find.byKey(const ValueKey('new-session-assistant')));
