@@ -367,6 +367,16 @@ void bubbleLayoutTests() {
       await tester.tap(find.byKey(const ValueKey('collapse-update-update')));
       await tester.pumpAndSettle();
       expect(body(), findsNothing);
+      await tester.drag(row, const Offset(150, 0));
+      await tester.pumpAndSettle();
+      expect(find.byType(ThreadDetailPage), findsOneWidget);
+      expect(
+        tester
+            .widget<ThreadDetailPage>(find.byType(ThreadDetailPage))
+            .threadHead
+            .id,
+        'update',
+      );
       expect(tester.takeException(), isNull);
     },
   );

@@ -88,6 +88,35 @@ void main() {
         nsec: owner.nsec,
       );
       final sync = MeSync(relay, config, prefs: prefs);
+      final nativeChannels = <MethodChannel>[];
+      const platformViews = MethodChannel('flutter/platform_views');
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        platformViews,
+        (call) async {
+          if (call.method == 'create') {
+            final args = call.arguments as Map<Object?, Object?>;
+            if (args['viewType'] == 'buzz/ios_navigation_bar') {
+              final channel = MethodChannel(
+                'buzz/ios_navigation_bar/${args['id']}',
+              );
+              nativeChannels.add(channel);
+              tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+                channel,
+                (call) async => null,
+              );
+            }
+          }
+          return null;
+        },
+      );
+      addTearDown(() {
+        for (final channel in [platformViews, ...nativeChannels]) {
+          tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+            channel,
+            null,
+          );
+        }
+      });
       const bridge = MethodChannel('buzz/profile_text_editor');
       var forms = 0;
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(bridge, (
@@ -127,11 +156,25 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      // Ownership verification runs on a real isolate; fake-clock settling
+      // alone cannot wait for its completion.
       tester
           .widget<FrostedAppBar>(find.byType(FrostedAppBar))
           .nativeActions!
           .firstWhere((action) => action.label == 'New chat')
           .onPressed!();
+      await tester.pumpAndSettle();
+      for (
+        var attempt = 0;
+        attempt < 500 && relay.submitted.isEmpty;
+        attempt++
+      ) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 10)),
+        );
+        await tester.pump();
+      }
+      expect(relay.submitted, hasLength(1));
       await tester.pumpAndSettle();
       final command = relay.submitted.single;
       expect(command.kind, 9007);
@@ -140,6 +183,8 @@ void main() {
       expect(command.tags, contains(equals(['channel_type', 'stream'])));
       expect(command.tags, contains(equals(['visibility', 'private'])));
       expect(command.tags.where((tag) => tag.first == 'P'), isEmpty);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
     },
     variant: TargetPlatformVariant.only(TargetPlatform.iOS),
   );

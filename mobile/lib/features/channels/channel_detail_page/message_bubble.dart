@@ -142,7 +142,8 @@ class _MessageBubble extends HookConsumerWidget {
     }
 
     if (message.isAgentCoordination && !coordinationExpanded.value) {
-      return Padding(
+      final collapsed = Padding(
+        key: swipeContentKey,
         padding: const EdgeInsets.symmetric(vertical: Grid.xxs),
         child: Material(
           color: Colors.transparent,
@@ -198,6 +199,16 @@ class _MessageBubble extends HookConsumerWidget {
             ),
           ),
         ),
+      );
+      return MessageSwipeReply(
+        contentKey: swipeContentKey,
+        message: message,
+        allMessages: allMessages,
+        channelId: currentChannelId,
+        currentPubkey: currentPubkey,
+        isMember: isMember,
+        isArchived: isArchived,
+        child: collapsed,
       );
     }
 
