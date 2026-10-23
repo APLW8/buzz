@@ -30,19 +30,24 @@ async function expectContentSurfaceHorizontalGutters(
   page: import("@playwright/test").Page,
   expectedLeftGutter = 1,
 ) {
-  const [mainInsetBox, contentBox] = await Promise.all([
-    page.locator("[data-buzz-glass-inset]").boundingBox(),
-    page.locator("[data-buzz-content-surface]").first().boundingBox(),
-  ]);
-  expect(mainInsetBox).not.toBeNull();
-  expect(contentBox).not.toBeNull();
-  const leftGutter = (contentBox?.x ?? 0) - (mainInsetBox?.x ?? 0);
-  const rightGutter =
-    (mainInsetBox?.x ?? 0) +
-    (mainInsetBox?.width ?? 0) -
-    ((contentBox?.x ?? 0) + (contentBox?.width ?? 0));
-  expect(Math.abs(leftGutter - expectedLeftGutter)).toBeLessThan(0.5);
-  expect(Math.abs(rightGutter - 8)).toBeLessThan(0.5);
+  // Read both edges in one browser frame while the sidebar width transitions.
+  await expect
+    .poll(() =>
+      page.locator("[data-buzz-glass-inset]").evaluate((mainInset) => {
+        const content = mainInset.querySelector("[data-buzz-content-surface]");
+        if (!content) return null;
+        const mainInsetBox = mainInset.getBoundingClientRect();
+        const contentBox = content.getBoundingClientRect();
+        return {
+          left: contentBox.left - mainInsetBox.left,
+          right: mainInsetBox.right - contentBox.right,
+        };
+      }),
+    )
+    .toEqual({
+      left: expect.closeTo(expectedLeftGutter, 0),
+      right: expect.closeTo(8, 0),
+    });
 }
 
 async function seedCommunities(
