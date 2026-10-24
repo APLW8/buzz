@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' show lerpDouble;
 
+import 'package:duo_kit/duo_kit.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
@@ -17,6 +18,25 @@ part 'pairing_qr_scanner/fallback_scanner.dart';
 part 'pairing_qr_scanner/scanner_camera.dart';
 
 const _qrScannerPlatformChannel = MethodChannel('buzz/qr_scanner');
+
+/// The Duo cover camera, excluding the edge-attached status cluster.
+Rect? duoQrScannerCameraFrame(BuildContext context) {
+  if (defaultTargetPlatform != TargetPlatform.iOS) return null;
+  final fold = FoldGeometry.of(context);
+  if (fold.strip == null) return null;
+  for (final rect in fold.occlusions) {
+    if (rect.width > 0 &&
+        (rect.width - rect.height).abs() < 1 &&
+        rect.left > 0 &&
+        rect.top > 0 &&
+        rect.right < fold.size.width &&
+        rect.bottom < fold.size.height &&
+        fold.strip!.rect.contains(rect.center)) {
+      return rect;
+    }
+  }
+  return null;
+}
 
 /// Returns whether the current iPhone should use the Dynamic Island scanner.
 ///
@@ -103,6 +123,7 @@ class DynamicIslandQrScannerGeometry {
   const DynamicIslandQrScannerGeometry({
     required this.viewport,
     required this.safeAreaTop,
+    this.cameraFrame,
   });
 
   /// The full logical-pixel size available to the portal route.
@@ -110,6 +131,9 @@ class DynamicIslandQrScannerGeometry {
 
   /// The top safe-area inset reported by iOS.
   final double safeAreaTop;
+
+  /// The Duo camera cutout; null retains the Dynamic Island geometry.
+  final Rect? cameraFrame;
 
   static const _collapsedWidth = 120.0;
   static const _collapsedHeight = 36.0;
@@ -125,15 +149,35 @@ class DynamicIslandQrScannerGeometry {
       _fallbackTop + math.max(0, safeAreaTop - _referenceSafeAreaTop);
 
   /// The portal frame before the opening animation starts.
-  Rect get collapsedFrame => Rect.fromLTWH(
-    (viewport.width - _collapsedWidth) / 2,
-    top,
-    _collapsedWidth,
-    _collapsedHeight,
-  );
+  Rect get collapsedFrame =>
+      cameraFrame ??
+      Rect.fromLTWH(
+        (viewport.width - _collapsedWidth) / 2,
+        top,
+        _collapsedWidth,
+        _collapsedHeight,
+      );
 
   /// The square camera frame after the opening animation completes.
   Rect get expandedFrame {
+    final camera = cameraFrame;
+    if (camera != null) {
+      final size = math.min(
+        420.0,
+        math.min(viewport.width, viewport.height) - _edgeMargin * 2,
+      );
+      final left = camera.center.dx > viewport.width / 2
+          ? viewport.width - _edgeMargin - size
+          : _edgeMargin;
+      final desiredTop = camera.center.dy > viewport.height / 2
+          ? camera.bottom - size
+          : camera.top;
+      final top = desiredTop.clamp(
+        _edgeMargin,
+        viewport.height - _edgeMargin - size,
+      );
+      return Rect.fromLTWH(left, top, size, size);
+    }
     final maxHeight = math.max(
       _collapsedHeight,
       viewport.height - top - _edgeMargin,
@@ -149,7 +193,7 @@ class DynamicIslandQrScannerGeometry {
     final end = expandedFrame;
     return Rect.fromLTRB(
       lerpDouble(start.left, end.left, t)!,
-      top,
+      lerpDouble(start.top, end.top, t)!,
       lerpDouble(start.right, end.right, t)!,
       lerpDouble(start.bottom, end.bottom, t)!,
     );
@@ -158,7 +202,7 @@ class DynamicIslandQrScannerGeometry {
   /// Returns the portal corner radius at [progress].
   double cornerRadiusAt(double progress) {
     final t = progress.clamp(0.0, 1.0);
-    return lerpDouble(_collapsedHeight / 2, _expandedCornerRadius, t)!;
+    return lerpDouble(collapsedFrame.height / 2, _expandedCornerRadius, t)!;
   }
 
   /// Returns the camera opacity after its delayed entrance.

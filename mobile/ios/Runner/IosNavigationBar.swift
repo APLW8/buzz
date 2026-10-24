@@ -410,7 +410,9 @@ private final class IosNavigationBarView: NSObject, FlutterPlatformView {
         guard let surface else { continue }
         let size = surface.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
         surface.frame = CGRect(x: trailing ? container.bounds.width - 20 - size.width : 16,
-                               y: max(12, (container.bounds.height - size.height) / 2),
+                               y: navigation.navigationBar.prefersLargeTitles
+                                 ? max(12, flutterSafeTop + 24 + (44 - size.height) / 2)
+                                 : max(12, (container.bounds.height - size.height) / 2),
                                width: size.width, height: size.height)
         surface.layoutIfNeeded()
       }
@@ -492,7 +494,8 @@ private final class IosNavigationBarView: NSObject, FlutterPlatformView {
     headerTrailing?.removeFromSuperview()
     headerLeading = nil
     headerTrailing = nil
-    navigation.view.isHidden = standaloneControl || horizontalControls
+    navigation.view.isHidden = standaloneControl
+      || (horizontalControls && args["largeTitle"] as? Bool != true)
     if standaloneControl {
       material.isHidden = true
       edgeScrollView.isHidden = true
@@ -515,12 +518,16 @@ private final class IosNavigationBarView: NSObject, FlutterPlatformView {
     titleColor = color
     largeTitleOpacity = -1
     let largeTitle = args["largeTitle"] as? Bool == true
+    // Flutter owns a continuous backdrop across the pane and status rail.
+    // A second native material would stop abruptly at the pane boundary.
+    let paneOwnsBackdrop = alignCollapsedTitleToLeading
+      || args["centerTitleInPane"] as? Bool == true
     alwaysFrosted = args["alwaysFrosted"] as? Bool == true
     if #available(iOS 26.0, *) {
       if #available(iOS 27.0, *) { usesSystemScrollEdge = true }
       content.scrollView.topEdgeEffect.style = .soft
-      content.scrollView.topEdgeEffect.isHidden = !usesSystemScrollEdge || !alwaysFrosted || largeTitle
-      edgeScrollView.isHidden = alwaysFrosted && !largeTitle
+      content.scrollView.topEdgeEffect.isHidden = paneOwnsBackdrop || !usesSystemScrollEdge || !alwaysFrosted || largeTitle
+      edgeScrollView.isHidden = paneOwnsBackdrop || (alwaysFrosted && !largeTitle)
     }
     // Large-title pages need material across the whole header: the stationary
     // system edge only blurs the status area, leaving expanded text over rows.
@@ -529,12 +536,12 @@ private final class IosNavigationBarView: NSObject, FlutterPlatformView {
     // Conversations use the navigation controller's native edge. Other pages
     // use a stationary native edge so UIKit's large-title inset adjustments
     // cannot hide the status-area fade when the title expands or collapses.
-    material.isHidden = usesSystemScrollEdge && !largeTitle
+    material.isHidden = paneOwnsBackdrop || (usesSystemScrollEdge && !largeTitle)
     // Let the native fade extend past the bar without enlarging its hit area.
     // The mirrored content is transparent and the bottom edge is hidden.
     container.clipsToBounds = !usesSystemScrollEdge
     let appearance = UINavigationBarAppearance()
-    if usesSystemScrollEdge && !largeTitle {
+    if usesSystemScrollEdge && !largeTitle && !paneOwnsBackdrop {
       appearance.configureWithDefaultBackground()
     } else {
       appearance.configureWithTransparentBackground()

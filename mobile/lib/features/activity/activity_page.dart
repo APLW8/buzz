@@ -442,6 +442,7 @@ class ActivityPage extends HookConsumerWidget {
         nativeActions: [
           IosNavigationAction(
             label: 'Filter inbox',
+            keepInHeaderOnDuo: true,
             icon: BuzzIcons.filter2,
             children: [
               for (final entry in _filterLabels.entries)
@@ -454,6 +455,7 @@ class ActivityPage extends HookConsumerWidget {
           ),
           IosNavigationAction(
             label: 'Inbox options',
+            keepInHeaderOnDuo: true,
             symbol: 'ellipsis',
             children: [
               IosNavigationAction(

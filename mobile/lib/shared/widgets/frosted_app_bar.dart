@@ -314,6 +314,7 @@ class FrostedAppBar extends StatelessWidget {
             active: toolbarActive,
             actions: stripActions,
             child: Stack(
+              clipBehavior: Clip.none,
               children: [
                 // UIKit materials cannot reliably sample Flutter's scene behind
                 // a platform view. Blur the scrolling pane in its own compositor
@@ -321,19 +322,30 @@ class FrostedAppBar extends StatelessWidget {
                 if (strip != null && frosted)
                   Positioned(
                     top: 0,
-                    left: 0,
-                    right: 0,
+                    left: -(toolbarScope?.contentInsets.left ?? 0),
+                    right: -(toolbarScope?.contentInsets.right ?? 0),
                     height: barHeight,
-                    child: ClipRect(
-                      child: BackdropFilter(
-                        key: const ValueKey('duo-navigation-backdrop'),
-                        filter: ImageFilter.blur(
-                          sigmaX: frostedBlurSigma,
-                          sigmaY: frostedBlurSigma,
-                        ),
-                        child: ColoredBox(
-                          color: context.colors.surface.withValues(
-                            alpha: frostedSurfaceOpacity,
+                    child: IgnorePointer(
+                      child: ClipRect(
+                        child: BackdropFilter(
+                          key: const ValueKey('duo-navigation-backdrop'),
+                          filter: ImageFilter.blur(
+                            sigmaX: frostedBlurSigma,
+                            sigmaY: frostedBlurSigma,
+                          ),
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                stops: const [0.55, 1],
+                                colors: [
+                                  context.colors.surfaceContainerHighest
+                                      .withValues(alpha: frostedSurfaceOpacity),
+                                  context.colors.surface.withValues(alpha: 0),
+                                ],
+                              ),
+                            ),
                           ),
                         ),
                       ),
@@ -350,7 +362,10 @@ class FrostedAppBar extends StatelessWidget {
                         strip != null && nativeLargeTitle,
                     horizontalControls:
                         strip != null &&
-                        (leadingAction?.keepInHeaderOnDuo ?? false),
+                        ((leadingAction?.keepInHeaderOnDuo ?? false) ||
+                            trailingActions.any(
+                              (action) => action.keepInHeaderOnDuo,
+                            )),
                     onReadyChanged: onNativeReadyChanged,
                     title:
                         nativeTitle ??

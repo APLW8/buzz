@@ -108,6 +108,7 @@ class _DynamicIslandQrScannerPortal extends HookWidget {
               final geometry = DynamicIslandQrScannerGeometry(
                 viewport: constraints.biggest,
                 safeAreaTop: MediaQuery.viewPaddingOf(context).top,
+                cameraFrame: duoQrScannerCameraFrame(context),
               );
 
               return Stack(
@@ -133,7 +134,8 @@ class _DynamicIslandQrScannerPortal extends HookWidget {
                       // Once revealed, keep the camera mounted until the route
                       // closes. Native camera teardown can stall a moving frame.
                       if (scannerOpacity > 0) cameraMounted.value = true;
-                      final introLabelOpacity = isClosing.value
+                      final introLabelOpacity =
+                          isClosing.value || geometry.cameraFrame != null
                           ? 0.0
                           : geometry.introLabelOpacityAt(progress);
                       final promptOpacity = math.max(

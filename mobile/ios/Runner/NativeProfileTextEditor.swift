@@ -427,6 +427,11 @@ final class NativeProfileTextEditorViewController:
       target: self,
       action: #selector(setTapped)
     )
+    if isChatEditor && !fieldsLocked {
+      navigationItem.rightBarButtonItem?.title = nil
+      navigationItem.rightBarButtonItem?.image = UIImage(systemName: "checkmark")
+      navigationItem.rightBarButtonItem?.accessibilityLabel = "Create"
+    }
     if #available(iOS 27.1, *) {
       navigationItem.leftBarButtonItem?.axisBehavior = .verticalPreferred
       navigationItem.rightBarButtonItem?.axisBehavior = .verticalPreferred

@@ -9,6 +9,78 @@ import XCTest
 class RunnerTests: XCTestCase {
 
   @MainActor
+  func testListHeaderActionsAlignToPaneWhileLargeTitleRemainsVisible() throws {
+    let parent = UIViewController()
+    let window = UIWindow(windowScene: try XCTUnwrap(
+      UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first))
+    window.rootViewController = parent
+    window.makeKeyAndVisible()
+    defer { window.isHidden = true }
+    let factory = IosNavigationBarFactory(messenger: NavigationTestMessenger(), parent: parent)
+    let bar = factory.create(
+      withFrame: CGRect(x: 0, y: 0, width: 400, height: 164),
+      viewIdentifier: 999995,
+      arguments: [
+        "title": "Inbox", "largeTitle": true, "horizontalControls": true,
+        "alignCollapsedTitleToLeading": true,
+        "actions": [
+          ["id": "filter", "label": "Filter inbox", "symbol": "line.3.horizontal.decrease",
+           "enabled": true, "keepInHeaderOnDuo": true],
+          ["id": "options", "label": "Inbox options", "symbol": "ellipsis",
+           "enabled": true, "keepInHeaderOnDuo": true],
+        ],
+      ])
+    parent.view.addSubview(bar.view())
+    let navigation = try XCTUnwrap(parent.children.first as? UINavigationController)
+    for width: CGFloat in [320, 400] {
+      bar.view().frame.size.width = width
+      bar.view().setNeedsLayout()
+      bar.view().layoutIfNeeded()
+      XCTAssertFalse(navigation.view.isHidden)
+      let material = try XCTUnwrap(descendants(of: bar.view()).first {
+        $0.accessibilityIdentifier == "navigation-scroll-material"
+      })
+      XCTAssertTrue(material.isHidden, "Flutter owns the full-width pane backdrop")
+      XCTAssertTrue(navigation.navigationBar.prefersLargeTitles)
+      let button = try XCTUnwrap(descendants(of: bar.view()).compactMap { $0 as? UIButton }
+        .first { $0.accessibilityLabel == "Inbox options" })
+      let frame = button.convert(button.bounds, to: bar.view())
+      XCTAssertEqual(frame.maxX, width - 20, accuracy: 1)
+      XCTAssertLessThan(frame.maxY, 90)
+    }
+  }
+
+
+  @MainActor
+  func testConcentricSurfaceReportsEachResolvedCornerAfterLayout() throws {
+    guard #available(iOS 26.0, *) else { return }
+    let messenger = NavigationTestMessenger()
+    let platformView = ConcentricSheetSurfacePlatformView(
+      frame: CGRect(x: 0, y: 0, width: 400, height: 300),
+      viewIdentifier: 73,
+      messenger: messenger,
+      arguments: ["independentCorners": true]
+    )
+    let root = platformView.view()
+    let surface = try XCTUnwrap(root.subviews.first)
+    XCTAssertEqual(surface.layer.cornerCurve, .continuous)
+    for radii: [CGFloat] in [[24, 24, 62, 48], [48, 62, 24, 24]] {
+      surface.cornerConfiguration = .corners(
+        topLeftRadius: .fixed(radii[0]), topRightRadius: .fixed(radii[1]),
+        bottomLeftRadius: .fixed(radii[2]), bottomRightRadius: .fixed(radii[3])
+      )
+      root.setNeedsLayout()
+      root.layoutIfNeeded()
+      let reported = try XCTUnwrap(messenger.cornerRadii)
+      XCTAssertEqual(reported["topLeft"], radii[0])
+      XCTAssertEqual(reported["topRight"], radii[1])
+      XCTAssertEqual(reported["bottomLeft"], radii[2])
+      XCTAssertEqual(reported["bottomRight"], radii[3])
+    }
+  }
+
+
+  @MainActor
   func testProfileAvatarStartupFailureRestoresSheetAndAllowsRetry() async throws {
     let messenger = NavigationTestMessenger()
     let parent = UIViewController()
@@ -2161,12 +2233,14 @@ private actor NativeEmojiDownloadProbe {
 }
 
 private final class NavigationTestMessenger: NSObject, FlutterBinaryMessenger {
+  var cornerRadii: [String: CGFloat]?
   var metrics: [String: Any]?
   var avatarBounds: [String: Any]?
   var actions: [String] = []
   func send(onChannel channel: String, message: Data?) {
     guard let message else { return }
     let call = FlutterStandardMethodCodec.sharedInstance().decodeMethodCall(message)
+    if call.method == "cornerRadiiChanged" { cornerRadii = call.arguments as? [String: CGFloat] }
     if call.method == "metrics" { metrics = call.arguments as? [String: Any] }
     if call.method == "avatarBounds" { avatarBounds = call.arguments as? [String: Any] }
     if call.method == "action", let action = call.arguments as? String { actions.append(action) }
