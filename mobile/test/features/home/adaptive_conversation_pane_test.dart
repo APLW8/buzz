@@ -196,10 +196,12 @@ void main() {
       addTearDown(tester.view.reset);
       final navigator = GlobalKey<NavigatorState>();
       await tester.pumpWidget(
-        MaterialApp(
-          navigatorKey: navigator,
-          theme: AppTheme.light(),
-          home: const Scaffold(body: Text('Home')),
+        ProviderScope(
+          child: MaterialApp(
+            navigatorKey: navigator,
+            theme: AppTheme.light(),
+            home: const Scaffold(body: Text('Home')),
+          ),
         ),
       );
       navigator.currentState!.push(
@@ -258,34 +260,36 @@ void main() {
       tester.view.physicalSize = const Size(900, 700);
       addTearDown(tester.view.reset);
       await tester.pumpWidget(
-        MaterialApp(
-          theme: AppTheme.light(),
-          home: Scaffold(
-            body: ValueListenableBuilder<bool>(
-              valueListenable: active,
-              builder: (context, isActive, _) => AdaptiveConversationPane(
-                active: isActive,
-                controller: controller,
-                list: Builder(
-                  builder: (context) => Column(
-                    children: [
-                      TextButton(
-                        onPressed: () => ConversationPaneScope.maybeOf(
-                          context,
-                        )!.open('one', (_) => const _Conversation()),
-                        child: const Text('First chat'),
-                      ),
-                      TextButton(
-                        onPressed: () =>
-                            ConversationPaneScope.maybeOf(context)!.open(
-                              'two',
-                              (_) => const Scaffold(
-                                body: Text('Second conversation'),
+        ProviderScope(
+          child: MaterialApp(
+            theme: AppTheme.light(),
+            home: Scaffold(
+              body: ValueListenableBuilder<bool>(
+                valueListenable: active,
+                builder: (context, isActive, _) => AdaptiveConversationPane(
+                  active: isActive,
+                  controller: controller,
+                  list: Builder(
+                    builder: (context) => Column(
+                      children: [
+                        TextButton(
+                          onPressed: () => ConversationPaneScope.maybeOf(
+                            context,
+                          )!.open('one', (_) => const _Conversation()),
+                          child: const Text('First chat'),
+                        ),
+                        TextButton(
+                          onPressed: () =>
+                              ConversationPaneScope.maybeOf(context)!.open(
+                                'two',
+                                (_) => const Scaffold(
+                                  body: Text('Second conversation'),
+                                ),
                               ),
-                            ),
-                        child: const Text('Second chat'),
-                      ),
-                    ],
+                          child: const Text('Second chat'),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
