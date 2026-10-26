@@ -458,10 +458,12 @@ async fn apply_pgschema_to_existing_database(pool: &PgPool) {
         .fetch_one(pool)
         .await
         .unwrap();
-    let pgschema = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../bin/pgschema");
-    let schema_file =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../schema/schema.sql");
-    let output = std::process::Command::new(pgschema)
+    // Run from the repository root, like every pgschema caller, so
+    // `.pgschemaignore` applies.
+    let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let schema_file = repo_root.join("schema/schema.sql");
+    let output = std::process::Command::new(repo_root.join("bin/pgschema"))
+        .current_dir(&repo_root)
         .args([
             "apply",
             "--auto-approve",
