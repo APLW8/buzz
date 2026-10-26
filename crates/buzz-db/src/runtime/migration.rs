@@ -772,7 +772,12 @@ mod postgres_tests {
         let mut migrations: Vec<_> = MIGRATOR.iter().collect();
         migrations.sort_by_key(|migration| migration.version);
 
-        assert_eq!(migrations.len(), 73);
+        assert_eq!(migrations.len(), 74);
+        assert_eq!(migrations[73].version, 74);
+        assert!(migrations[73]
+            .sql
+            .as_str()
+            .contains("ADD COLUMN auto_join BOOLEAN NOT NULL DEFAULT false"));
         assert_eq!(migrations[72].version, 73);
         assert_eq!(migrations[71].version, 72);
         assert_eq!(migrations[70].version, 71);
