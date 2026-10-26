@@ -2646,11 +2646,9 @@ pub struct WebhookQuery {
 /// Webhook trigger endpoint. No user auth — the webhook secret authenticates the caller.
 ///
 /// Prefers `X-Webhook-Secret` header over `?secret=` query param (headers aren't logged
-/// by most proxies). Returns 202 Accepted; execution is async. A run is admitted
-/// when its `workflow_runs` row is inserted; immediately before that insert,
-/// admission checks the workflow owner's active ban in the host-bound community.
-/// This point-in-time check does not cancel already-created runs, and a
-/// concurrent ban committed after the lookup can race with row insertion.
+/// by most proxies). Returns 202 Accepted; execution is async. Immediately
+/// before the `workflow_runs` insert, the owner authority gate also rejects an
+/// owner banned from the host-bound community.
 pub async fn workflow_webhook(
     State(state): State<Arc<AppState>>,
     Path(id_str): Path<String>,
@@ -2744,9 +2742,10 @@ pub async fn workflow_webhook(
     // executes with the workflow **owner's** standing authority — so the
     // secret alone is insufficient. Immediately before run creation, reject
     // disabled/inactive workflows and recheck the owner's current channel
-    // membership (and role, for exfiltration-capable definitions). Fail
-    // closed with the same generic 404 as the lookups above so a
-    // revoked-owner workflow is indistinguishable from a nonexistent one.
+    // membership (and role, for exfiltration-capable definitions) and that
+    // the owner is not banned. Fail closed with the same generic 404 as the
+    // lookups above so a revoked-owner workflow is indistinguishable from a
+    // nonexistent one.
     if !workflow.enabled || workflow.status != buzz_db::workflow::WorkflowStatus::Active {
         return Err(not_found("workflow not found"));
     }
@@ -2759,21 +2758,6 @@ pub async fn workflow_webhook(
         .check_owner_authority(community_id, wf_channel_id, &workflow.owner_pubkey, &def)
         .await
         .map_err(|_| not_found("workflow not found"))?;
-
-    // The workflow_runs insert is the admission boundary. This is the last
-    // authorization gate before it. The restriction read is authoritative and
-    // tenant-scoped; lookup failures deny admission just like an active ban. It
-    // is intentionally a point-in-time check rather than a transaction with ban
-    // writes, so a ban racing after this read may follow the run insertion. Runs
-    // already inserted are unaffected.
-    let restrictions = state
-        .db
-        .moderation_restriction_state(community_id, &workflow.owner_pubkey)
-        .await
-        .map_err(|_| not_found("workflow not found"))?;
-    if restrictions.banned {
-        return Err(not_found("workflow not found"));
-    }
 
     let run_id = state
         .db

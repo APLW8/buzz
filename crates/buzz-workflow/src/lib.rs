@@ -142,10 +142,15 @@ impl WorkflowEngine {
     ///   in a role that can write (a guest cannot);
     /// - if the definition contains an exfiltration-capable action
     ///   (`call_webhook`), the owner must currently hold the `owner` or
-    ///   `admin` role.
+    ///   `admin` role;
+    /// - the owner, or the human owner of an agent owner, must not be banned
+    ///   from the community. Bans leave channel membership in place, so the
+    ///   role check alone would keep a banned owner's workflows running.
     ///
     /// Any lookup error denies (fail-closed): a removed owner must never keep
     /// exfiltration authority because a membership read happened to fail.
+    /// This is a point-in-time check: it does not cancel runs that already
+    /// exist, and a ban that commits after it can race with run creation.
     pub async fn check_owner_authority(
         &self,
         community_id: CommunityId,
@@ -162,13 +167,26 @@ impl WorkflowEngine {
                     "owner authority lookup failed (fail-closed): {e}"
                 ))
             })?;
-        if owner_authority_allows(role.as_deref(), def.requires_elevated_authority()) {
-            Ok(())
-        } else {
-            Err(WorkflowError::Unauthorized(
+        if !owner_authority_allows(role.as_deref(), def.requires_elevated_authority()) {
+            return Err(WorkflowError::Unauthorized(
                 "workflow owner lacks current channel authority".into(),
-            ))
+            ));
         }
+        let restrictions = self
+            .db
+            .moderation_restriction_state(community_id, owner_pubkey)
+            .await
+            .map_err(|e| {
+                WorkflowError::Unauthorized(format!(
+                    "owner restriction lookup failed (fail-closed): {e}"
+                ))
+            })?;
+        if restrictions.banned {
+            return Err(WorkflowError::Unauthorized(
+                "workflow owner is banned from the community".into(),
+            ));
+        }
+        Ok(())
     }
 
     /// Set the action sink. Called once after `AppState` construction.
@@ -2034,6 +2052,72 @@ steps:
             runs.len(),
             1,
             "no new run may be created after the owner lost membership"
+        );
+    }
+
+    /// A ban leaves the owner's channel membership in place, so the event
+    /// path must still stop creating runs while the owner is banned, and
+    /// resume once the ban is lifted. Cron and webhook runs pass through the
+    /// same `check_owner_authority` gate.
+    #[tokio::test]
+    #[ignore = "requires Postgres"]
+    async fn on_event_denies_run_while_owner_banned() {
+        let db = setup_db().await;
+        let creator = nostr::Keys::generate().public_key().to_bytes().to_vec();
+        let member = nostr::Keys::generate().public_key().to_bytes().to_vec();
+        let (community, channel_id) = setup_channel(&db, &creator, &member).await;
+
+        let def_json = serde_json::json!({
+            "name": "ban-event",
+            "trigger": {"on": "message_posted"},
+            "steps": [{"id": "s1", "action": "send_message", "text": "hi"}],
+            "enabled": true,
+        })
+        .to_string();
+        let workflow_id = db
+            .create_workflow(
+                community,
+                Some(channel_id),
+                &member,
+                "ban-event",
+                &def_json,
+                &[0u8; 32],
+            )
+            .await
+            .expect("create workflow");
+        let engine = Arc::new(WorkflowEngine::new(db.clone(), WorkflowConfig::default()));
+        let run_count = || async {
+            db.list_workflow_runs(community, workflow_id, 10)
+                .await
+                .expect("list runs")
+                .len()
+        };
+
+        db.ban_community_member(community, &member, &creator, None, None)
+            .await
+            .expect("ban owner");
+        engine
+            .on_event(community, &message_event(channel_id))
+            .await
+            .expect("on_event while banned");
+        assert_eq!(
+            run_count().await,
+            0,
+            "a banned owner's workflow must not fire"
+        );
+
+        assert!(db
+            .unban_community_member(community, &member, &creator)
+            .await
+            .expect("unban owner"));
+        engine
+            .on_event(community, &message_event(channel_id))
+            .await
+            .expect("on_event after unban");
+        assert_eq!(
+            run_count().await,
+            1,
+            "an unbanned owner's workflow fires again"
         );
     }
 
