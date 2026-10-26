@@ -15276,6 +15276,7 @@ mod tests {
                     &nostr::Keys::generate(),
                 )
                 .await
+                .map(|write| write.outcome)
                 .expect("seed relay administrator");
 
             let control = nostr::Keys::generate();
