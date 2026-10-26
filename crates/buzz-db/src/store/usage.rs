@@ -38,6 +38,8 @@ pub struct FleetStockSnapshot {
     pub channels_dm: i64,
     /// Non-deleted workflow channels.
     pub channels_workflow: i64,
+    /// Non-deleted system channels.
+    pub channels_system: i64,
     /// Relay owners.
     pub members_owner: i64,
     /// Relay administrators.
@@ -96,7 +98,8 @@ where
                 COUNT(*) FILTER (WHERE channel_type = 'stream') AS stream,
                 COUNT(*) FILTER (WHERE channel_type = 'forum') AS forum,
                 COUNT(*) FILTER (WHERE channel_type = 'dm') AS dm,
-                COUNT(*) FILTER (WHERE channel_type = 'workflow') AS workflow
+                COUNT(*) FILTER (WHERE channel_type = 'workflow') AS workflow,
+                COUNT(*) FILTER (WHERE channel_type = 'system') AS system
             FROM channels
             WHERE deleted_at IS NULL
         ),
@@ -122,6 +125,7 @@ where
             channels.forum AS channels_forum,
             channels.dm AS channels_dm,
             channels.workflow AS channels_workflow,
+            channels.system AS channels_system,
             members.owner AS members_owner,
             members.admin AS members_admin,
             members.member AS members_member,
@@ -191,16 +195,16 @@ where
     .await?)
 }
 
-/// Owns the detached Postgres session holding the relay usage-metrics advisory lock.
+/// Owns the detached Postgres session holding a deployment-wide leader advisory lock.
 ///
 /// The connection deliberately does not return to the main pool: session advisory
-/// locks must remain bound to this exact physical connection, and the poller
-/// pings it before each leader-only collection tick.
-pub struct UsageMetricsLeader {
+/// locks must remain bound to this exact physical connection, and each leader-only
+/// loop (usage metrics, NIP-43 snapshot reconciliation) pings it before working.
+pub struct SessionLeader {
     connection: PgConnection,
 }
 
-impl UsageMetricsLeader {
+impl SessionLeader {
     /// Returns whether the lock-owning session is still reachable.
     ///
     /// Bounded to 5 seconds — a blackholed connection (no RST) would otherwise
@@ -600,17 +604,15 @@ fn into_community_hosts(rows: Vec<(Uuid, String)>) -> Vec<CommunityHost> {
 }
 
 impl Db {
-    /// Try to acquire the detached session advisory lock for relay usage metrics.
+    /// Try to acquire the detached session advisory lock `lock_key`, making this
+    /// replica the leader for the job that key names.
     ///
     /// The returned guard owns the exact connection that acquired the lock. It is
     /// detached from the shared pool so a stable leader neither returns a locked
     /// session to other callers nor permanently consumes a pool slot. Dropping the
     /// guard closes the connection and releases the session-scoped lock.
-    #[datastore_span(name = "try_lock_usage_metrics", system = "postgresql")]
-    pub async fn try_lock_usage_metrics(
-        &self,
-        lock_key: i64,
-    ) -> Result<Option<UsageMetricsLeader>> {
+    #[datastore_span(name = "try_lock_session_leader", system = "postgresql")]
+    pub async fn try_lock_session_leader(&self, lock_key: i64) -> Result<Option<SessionLeader>> {
         let mut connection = observability::acquire_writer_with_legacy_metrics(
             &self.pool,
             observability::WriterOperation::Maintenance,
@@ -621,7 +623,7 @@ impl Db {
             .fetch_one(&mut *connection)
             .await?;
         if acquired {
-            Ok(Some(UsageMetricsLeader {
+            Ok(Some(SessionLeader {
                 connection: connection.detach(),
             }))
         } else {
@@ -766,12 +768,6 @@ impl Db {
     pub async fn active_community_hosts(&self) -> Result<Vec<CommunityHost>> {
         active_community_hosts(&self.pool, observability::WriterOperation::Maintenance).await
     }
-
-    /// Return active community host mappings during startup bootstrap work.
-    #[datastore_span(name = "bootstrap_community_hosts", system = "postgresql")]
-    pub async fn bootstrap_community_hosts(&self) -> Result<Vec<CommunityHost>> {
-        active_community_hosts(&self.pool, observability::WriterOperation::Bootstrap).await
-    }
 }
 
 #[cfg(test)]
@@ -909,14 +905,14 @@ mod postgres_tests {
         let key = 0x4255_5A5A_4D45_5452;
 
         let mut leader = first
-            .try_lock_usage_metrics(key)
+            .try_lock_session_leader(key)
             .await
             .expect("first lock attempt")
             .expect("first database handle becomes leader");
         assert!(leader.is_live().await, "lock owner remains reachable");
         assert!(
             second
-                .try_lock_usage_metrics(key)
+                .try_lock_session_leader(key)
                 .await
                 .expect("second lock attempt")
                 .is_none(),
@@ -924,14 +920,24 @@ mod postgres_tests {
         );
 
         drop(leader);
-        assert!(
-            second
-                .try_lock_usage_metrics(key)
+        // Dropping closes the socket; the server releases the session lock only
+        // once its backend observes the disconnect, so poll briefly.
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        let successor = loop {
+            let attempt = second
+                .try_lock_session_leader(key)
                 .await
-                .expect("lock attempt after leader drop")
-                .is_some(),
+                .expect("lock attempt after leader drop");
+            if attempt.is_some() || tokio::time::Instant::now() >= deadline {
+                break attempt;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        };
+        assert!(
+            successor.is_some(),
             "dropping the detached session releases its advisory lock"
         );
+        drop(successor);
 
         // Release any remaining session state before DROP DATABASE.
         drop(first);
@@ -1169,10 +1175,7 @@ mod postgres_tests {
 
         let db = Db::from_pool(pool.clone());
         for sweep in 0..2 {
-            for (caller, hosts) in [
-                ("maintenance", db.active_community_hosts().await),
-                ("bootstrap", db.bootstrap_community_hosts().await),
-            ] {
+            for (caller, hosts) in [("maintenance", db.active_community_hosts().await)] {
                 let hosts = hosts.unwrap_or_else(|e| panic!("{caller} sweep {sweep}: {e}"));
                 let ids: std::collections::HashSet<Uuid> = hosts.iter().map(|h| h.id).collect();
                 assert_eq!(
@@ -1455,7 +1458,7 @@ mod postgres_tests {
         .await
         .expect("deactivate user");
 
-        for channel_type in ["stream", "forum", "dm", "workflow"] {
+        for channel_type in ["stream", "forum", "dm", "workflow", "system"] {
             sqlx::query(
                 "INSERT INTO channels (id, community_id, name, channel_type, visibility, created_by) \
                  VALUES ($1, $2, $3, $4::channel_type, 'open', $5)",
@@ -1589,8 +1592,9 @@ mod postgres_tests {
                 stock.channels_forum,
                 stock.channels_dm,
                 stock.channels_workflow,
+                stock.channels_system,
             ),
-            (1, 1, 1, 1)
+            (1, 1, 1, 1, 1)
         );
         assert_eq!(
             (

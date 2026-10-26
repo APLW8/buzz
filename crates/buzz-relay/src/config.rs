@@ -211,7 +211,7 @@ pub struct Config {
     pub partition_manager_create_enabled: bool,
     /// Whether the partition manager may replace an empty right-edge catch-all
     /// with dedicated monthlies. Also enables periodic (not only startup) DDL.
-    /// Requires `partition_manager_create_enabled`.
+    /// On by default; requires `partition_manager_create_enabled`.
     pub partition_manager_advance_enabled: bool,
 
     /// When true, NIP-42 pubkey-only authentication (no API token) is
@@ -289,7 +289,7 @@ pub struct Config {
     /// skipped — a typo must not silently disable an operator.
     pub relay_operator_pubkeys: Vec<String>,
 
-    /// Configured operator-listener identities and their HTTPS delivery URLs.
+    /// Configured operator-listener identities and their HTTP(S) delivery URLs.
     pub operator_listener_delivery_urls: HashMap<String, url::Url>,
 
     /// Allow NIP-OA owner attestation for relay membership.
@@ -398,6 +398,16 @@ pub struct Config {
     /// the enforce verdict but admits exactly as `off`. `Off` (the default)
     /// leaves all identity enforcement to NIP-42 alone.
     pub nip_fi: crate::nip_fi_config::NipFiRelayConfig,
+
+    /// Issuer binding written to communities created under a host suffix
+    /// (`BUZZ_NIP_FI_PROVISION_BINDING`). `None` binds nothing at creation.
+    /// Parsed whatever the NIP-FI mode, since creation happens in every mode.
+    pub nip_fi_provision_binding: Option<buzz_auth::ProvisionBindingPolicy>,
+
+    /// Database resolver bounds (`BUZZ_NIP_FI_RESOLVER_*`,
+    /// `BUZZ_NIP_FI_SNAPSHOT_*`). Validated in every mode, so a bad value
+    /// fails the deploy that sets it, not the later switch to shadow.
+    pub nip_fi_resolver_bounds: crate::nip_fi_resolver::ResolverBounds,
 }
 
 fn parse_bind_addr(raw: &str) -> Result<SocketAddr, ConfigError> {
@@ -532,7 +542,7 @@ fn parse_operator_listener_delivery_urls(
                 "BUZZ_OPERATOR_LISTENERS endpoint is not a valid URL: {e}"
             ))
         })?;
-        if url.scheme() != "https"
+        if !matches!(url.scheme(), "http" | "https")
             || url.host().is_none()
             || !url.username().is_empty()
             || url.password().is_some()
@@ -540,7 +550,7 @@ fn parse_operator_listener_delivery_urls(
             || url.fragment().is_some()
         {
             return Err(ConfigError::InvalidValue(
-                "BUZZ_OPERATOR_LISTENERS endpoints must be HTTPS URLs without credentials, query, or fragment"
+                "BUZZ_OPERATOR_LISTENERS endpoints must be HTTP(S) URLs without credentials, query, or fragment"
                     .to_string(),
             ));
         }
@@ -943,9 +953,10 @@ impl Config {
         );
         let partition_manager_create_enabled =
             parse_bool("BUZZ_PARTITION_MANAGER_CREATE_ENABLED", true)?;
-        // Off by default: each environment opts in after its canary.
+        // On by default: a fresh install's migrated catch-all covers months
+        // from 2026-07, and only advancement replaces it with monthlies.
         let partition_manager_advance_enabled =
-            parse_bool("BUZZ_PARTITION_MANAGER_ADVANCE_ENABLED", false)?;
+            parse_bool("BUZZ_PARTITION_MANAGER_ADVANCE_ENABLED", true)?;
 
         let s3_addressing_style = match std::env::var("BUZZ_S3_ADDRESSING_STYLE") {
             Ok(value) => value.parse().map_err(ConfigError::InvalidValue)?,
@@ -1371,6 +1382,19 @@ impl Config {
             _ => buzz_db::personal_read::DEFAULT_RETENTION_SECONDS,
         };
 
+        let nip_fi = crate::nip_fi_config::NipFiRelayConfig::from_env()?;
+        let nip_fi_provision_binding = crate::nip_fi_config::parse_provision_binding()?;
+        let nip_fi_resolver_bounds =
+            crate::nip_fi_resolver::ResolverBounds::from_env(db_pool_size)?;
+        if nip_fi.source == crate::nip_fi_config::CommunitySource::Database
+            && nip_fi_provision_binding.is_none()
+        {
+            return Err(ConfigError::InvalidValue(
+                "BUZZ_NIP_FI_COMMUNITY_SOURCE=database requires BUZZ_NIP_FI_PROVISION_BINDING \
+                 (the suffix and reserved host)"
+                    .into(),
+            ));
+        }
         Ok(Self {
             bind_addr,
             database_url,
@@ -1436,7 +1460,9 @@ impl Config {
             admin,
             web_dir,
             serve_git_web_gui,
-            nip_fi: crate::nip_fi_config::NipFiRelayConfig::from_env()?,
+            nip_fi_provision_binding,
+            nip_fi_resolver_bounds,
+            nip_fi,
         })
     }
 
@@ -1507,6 +1533,83 @@ mod tests {
         (fi, cfg)
     }
 
+    // The three `source=database` startup guards. Mutation: dropping any one
+    // lets that configuration start.
+    #[test]
+    fn database_source_config_guards_refuse_startup() {
+        const VARS: [&str; 6] = [
+            "BUZZ_NIP_FI_COMMUNITY_SOURCE",
+            "BUZZ_NIP_FI_COMMUNITIES",
+            "BUZZ_NIP_FI_ISSUERS",
+            "BUZZ_NIP_FI_PROVISION_BINDING",
+            "BUZZ_NIP_FI_MAX_CONNECTION_LIFETIME_SECS",
+            "BUZZ_NIP_FI_MODE",
+        ];
+        struct Clear;
+        impl Drop for Clear {
+            fn drop(&mut self) {
+                for v in VARS {
+                    std::env::remove_var(v);
+                }
+            }
+        }
+        let _guards = env_guards();
+        let _clear = Clear;
+        let refusal = || match Config::from_env() {
+            Err(ConfigError::InvalidValue(message)) => message,
+            other => panic!("expected a refusal, got {:?}", other.map(|_| ())),
+        };
+
+        std::env::set_var("BUZZ_NIP_FI_COMMUNITY_SOURCE", "ldap");
+        assert!(refusal().contains("must be \"env\" or \"database\""));
+
+        std::env::set_var("BUZZ_NIP_FI_COMMUNITY_SOURCE", "database");
+        std::env::set_var("BUZZ_NIP_FI_COMMUNITIES", "[]");
+        assert!(refusal().contains("BUZZ_NIP_FI_COMMUNITIES is set"));
+
+        std::env::remove_var("BUZZ_NIP_FI_COMMUNITIES");
+        std::env::set_var(
+            "BUZZ_NIP_FI_ISSUERS",
+            serde_json::json!([{
+                "issuer": "https://idp.example.com",
+                "command_audiences": ["https://relay.example.com"],
+                "token_class": "nip-fi+jwt",
+                "algorithms": ["ES256"],
+                "maximum_assertion_age_seconds": 3600,
+                "jwks_uri": "https://idp.example.com/.well-known/jwks.json",
+                "jwks_refresh_interval_seconds": 300,
+                "jwks_hard_deadline_seconds": 86400,
+                "maximum_command_age_seconds": 30,
+                "authorized_principals": ["https://idp.example.com/operator"]
+            }])
+            .to_string(),
+        );
+        std::env::set_var("BUZZ_NIP_FI_MAX_CONNECTION_LIFETIME_SECS", "3600");
+        assert!(refusal().contains("requires BUZZ_NIP_FI_PROVISION_BINDING"));
+
+        std::env::set_var(
+            "BUZZ_NIP_FI_PROVISION_BINDING",
+            r#"{"host_suffix":"communities.example.com","authorized_issuers":["https://idp.example.com"]}"#,
+        );
+        let config = Config::from_env().expect("complete database-source config");
+        assert!(config.nip_fi_provision_binding.is_some());
+    }
+
+    // Mutation: parsing the resolver bounds only when the resolver is built
+    // lets an off-mode deploy carry a value the switch to shadow refuses.
+    #[test]
+    fn resolver_bounds_are_validated_in_off_mode() {
+        let _guards = env_guards();
+        std::env::set_var("BUZZ_NIP_FI_RESOLVER_MAX_INFLIGHT", "0");
+        let result = Config::from_env();
+        std::env::remove_var("BUZZ_NIP_FI_RESOLVER_MAX_INFLIGHT");
+        assert!(
+            matches!(result, Err(ref e) if e.to_string().contains("BUZZ_NIP_FI_RESOLVER_MAX_INFLIGHT")),
+            "{:?}",
+            result.map(|_| ())
+        );
+    }
+
     /// Look up against a fixed set, standing in for process env.
     fn env_of<'a>(set: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + use<'a> {
         move |name| {
@@ -1574,7 +1677,7 @@ mod tests {
         assert_eq!(config.max_frame_bytes, DEFAULT_MAX_FRAME_BYTES);
         assert_eq!(config.partition_audit_interval, Duration::from_secs(900));
         assert!(config.partition_manager_create_enabled);
-        assert!(!config.partition_manager_advance_enabled);
+        assert!(config.partition_manager_advance_enabled);
         assert!(config.slow_client_grace_limit > 0);
         assert!(
             !config.pubkey_allowlist_enabled,
@@ -2022,7 +2125,7 @@ mod tests {
 
     #[test]
     fn partition_manager_config_has_bounded_interval_and_create_kill_switch() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guards = env_guards();
         let previous_interval = std::env::var_os("BUZZ_PARTITION_AUDIT_INTERVAL_SECS");
         let previous_create = std::env::var_os("BUZZ_PARTITION_MANAGER_CREATE_ENABLED");
 
@@ -2054,7 +2157,7 @@ mod tests {
 
     #[test]
     fn partition_manager_create_kill_switch_parses_false_values_strictly() {
-        let _guard = ENV_MUTEX.lock().unwrap();
+        let _guards = env_guards();
         let previous = std::env::var_os("BUZZ_PARTITION_MANAGER_CREATE_ENABLED");
 
         for value in ["FALSE", "off", "  false  "] {
@@ -2080,7 +2183,7 @@ mod tests {
     }
 
     #[test]
-    fn partition_manager_advance_is_opt_in_and_parses_strictly() {
+    fn partition_manager_advance_defaults_on_and_parses_strictly() {
         let _guards = env_guards();
         let previous = std::env::var_os("BUZZ_PARTITION_MANAGER_ADVANCE_ENABLED");
 
@@ -2088,6 +2191,8 @@ mod tests {
         let default = Config::from_env().expect("default config");
         std::env::set_var("BUZZ_PARTITION_MANAGER_ADVANCE_ENABLED", " TRUE ");
         let enabled = Config::from_env().expect("enabled config");
+        std::env::set_var("BUZZ_PARTITION_MANAGER_ADVANCE_ENABLED", "false");
+        let disabled = Config::from_env().expect("disabled config");
         std::env::set_var("BUZZ_PARTITION_MANAGER_ADVANCE_ENABLED", "enable-maybe");
         let invalid = Config::from_env();
 
@@ -2097,8 +2202,9 @@ mod tests {
             std::env::remove_var("BUZZ_PARTITION_MANAGER_ADVANCE_ENABLED");
         }
 
-        assert!(!default.partition_manager_advance_enabled);
+        assert!(default.partition_manager_advance_enabled);
         assert!(enabled.partition_manager_advance_enabled);
+        assert!(!disabled.partition_manager_advance_enabled);
         assert!(matches!(
             invalid,
             Err(ConfigError::InvalidValue(ref message))
@@ -2686,9 +2792,14 @@ mod tests {
     fn operator_listener_routes_reject_unsafe_or_duplicate_entries() {
         let key = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         for raw in [
-            format!("{key}:http://listener.example/mentions"),
+            format!("{key}:ftp://listener.example/mentions"),
+            format!("{key}:http://user:pass@listener:8080/mentions"),
+            format!("{key}:http://listener:8080/mentions?token=secret"),
+            format!("{key}:http://listener:8080/mentions#fragment"),
             format!("{key}:https://user:pass@listener.example/mentions"),
             format!("{key}:https://listener.example/mentions?token=secret"),
+            format!("{key}:https://listener.example/mentions#fragment"),
+            format!("{key}:http://listener:8080/mentions;{key}:https://other.example"),
             format!("{key}:https://listener.example/mentions;{key}:https://other.example"),
         ] {
             assert!(
@@ -2740,15 +2851,23 @@ mod tests {
     fn valid_and_absent_operator_listener_config_preserve_routes() {
         let _guards = env_guards();
         let key = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-        let raw = format!("{key}:https://listener.example/mentions");
-        let config = config_with_operator_listeners(Some(&raw)).expect("valid listener config");
-        assert_eq!(
-            config
-                .operator_listener_delivery_urls
-                .get(key)
-                .map(url::Url::as_str),
-            Some("https://listener.example/mentions")
-        );
+        for endpoint in [
+            "https://listener.example/mentions",
+            "http://operator-listener/mentions",
+            "http://operator-listener:8080/mentions",
+            "http://127.0.0.1:8080/mentions",
+            "http://[::1]:8080/mentions",
+        ] {
+            let raw = format!("{key}:{endpoint}");
+            let config = config_with_operator_listeners(Some(&raw)).expect("valid listener config");
+            assert_eq!(
+                config
+                    .operator_listener_delivery_urls
+                    .get(key)
+                    .map(url::Url::as_str),
+                Some(endpoint)
+            );
+        }
 
         let config = config_with_operator_listeners(None).expect("absent listener config");
         assert!(config.operator_listener_delivery_urls.is_empty());
