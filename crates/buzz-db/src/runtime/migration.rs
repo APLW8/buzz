@@ -772,7 +772,7 @@ mod postgres_tests {
         let mut migrations: Vec<_> = MIGRATOR.iter().collect();
         migrations.sort_by_key(|migration| migration.version);
 
-        assert_eq!(migrations.len(), 72);
+        assert_eq!(migrations.len(), 74);
         for (index, migration) in migrations.iter().enumerate() {
             assert_eq!(migration.version, (index + 1) as i64);
         }
@@ -803,8 +803,8 @@ mod postgres_tests {
             .sql
             .as_str()
             .contains("CREATE TABLE community_nip_fi_issuers"));
-        assert_eq!(migrations[71].version, 72);
-        let invite_migration = strip_sql_comments(migrations[71].sql.as_str());
+        assert_eq!(migrations[73].version, 74);
+        let invite_migration = strip_sql_comments(migrations[73].sql.as_str());
         assert!(invite_migration.contains("SET LOCAL lock_timeout = '5s'"));
         assert!(invite_migration.contains("SET LOCAL statement_timeout = '30s'"));
         assert!(
