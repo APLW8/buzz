@@ -284,6 +284,12 @@ run_unit_tests() {
       api::bridge::postgres_tests::bridge_search_mode_extension_accepts_prefix_snake_or_camel_case \
       api::bridge::postgres_tests::bridge_search_sort_extension_selects_newest_only_when_named
 
+  # Infra-free guard for the destructive invite fixture's database ownership
+  # check, by exact name: the rest of api::invites::postgres_tests needs a database.
+  run_test_step "buzz-relay invite fixture guard test" \
+    cargo test -p buzz-relay --lib -- --exact --nocapture \
+      api::invites::postgres_tests::restriction_tests::postgres_tests::destructive_fixture_rejects_shared_database_urls
+
   run_test_step "buzz-relay readiness tests" \
     cargo test -p buzz-relay --lib readiness::tests:: -- --nocapture
 
