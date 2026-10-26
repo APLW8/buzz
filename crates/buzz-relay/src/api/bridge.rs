@@ -7652,6 +7652,7 @@ pub(crate) mod postgres_tests {
                         &owner.public_key().to_hex(),
                         "member",
                         None,
+                        &nostr::Keys::generate(),
                     )
                     .await
                     .expect("seed owner as a community member");
@@ -7662,6 +7663,7 @@ pub(crate) mod postgres_tests {
                         &agent.public_key().to_hex(),
                         "admin",
                         None,
+                        &nostr::Keys::generate(),
                     )
                     .await
                     .expect("seed agent's own moderator role");
