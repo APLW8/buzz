@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 
 import 'package:buzz/features/channels/channel.dart';
 import 'package:buzz/features/channels/channels_provider.dart';
@@ -15,6 +17,45 @@ import 'package:hooks_riverpod/hooks_riverpod.dart';
 import '../../shared/community/community_storage_test.dart';
 
 void main() {
+  testWidgets('policy discovery failure opens the invite retry sheet', (
+    tester,
+  ) async {
+    const link = InviteDeepLink(
+      relayUrl: 'wss://relay.example.com',
+      code: 'code',
+    );
+    final container = ProviderContainer(
+      overrides: [
+        communityStorageProvider.overrideWithValue(
+          CommunityStorage(secure: FakeSecureStorage()),
+        ),
+        pendingDeepLinkProvider.overrideWith(
+          () => _FakePendingDeepLinkNotifier(link),
+        ),
+        inviteJoinHttpClientProvider.overrideWithValue(
+          MockClient((_) async => http.Response('{}', 503)),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(
+          home: DeepLinkDispatcher(child: Scaffold(body: SizedBox())),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(container.read(inviteJoinProvider).status, InviteJoinStatus.error);
+    expect(
+      find.textContaining('Could not join this community'),
+      findsOneWidget,
+    );
+    expect(find.widgetWithText(FilledButton, 'Join'), findsOneWidget);
+    expect(find.text('Cancel'), findsOneWidget);
+  });
+
   for (final outcome in ['handled', 'declined', 'failed']) {
     testWidgets('hosted handler drains queued links after $outcome setup', (
       tester,
@@ -47,6 +88,9 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
+            inviteJoinHttpClientProvider.overrideWithValue(
+              MockClient((_) async => http.Response('{}', 200)),
+            ),
             pendingDeepLinkProvider.overrideWith(() => pending),
             inviteKeyGeneratorProvider.overrideWithValue(
               () => throw StateError('must not generate'),
@@ -117,6 +161,9 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
+          inviteJoinHttpClientProvider.overrideWithValue(
+            MockClient((_) async => http.Response('{}', 200)),
+          ),
           pendingDeepLinkProvider.overrideWith(() => pending),
           channelsProvider.overrideWith(
             () => _FakeChannelsNotifier(Future.value([_channel])),
@@ -154,6 +201,9 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
+          inviteJoinHttpClientProvider.overrideWithValue(
+            MockClient((_) async => http.Response('{}', 200)),
+          ),
           pendingDeepLinkProvider.overrideWith(
             () => _FakePendingDeepLinkNotifier(link),
           ),
@@ -190,6 +240,9 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
+          inviteJoinHttpClientProvider.overrideWithValue(
+            MockClient((_) async => http.Response('{}', 200)),
+          ),
           pendingDeepLinkProvider.overrideWith(
             () => _FakePendingDeepLinkNotifier(link),
           ),
@@ -231,6 +284,9 @@ void main() {
 
     final container = ProviderContainer(
       overrides: [
+        inviteJoinHttpClientProvider.overrideWithValue(
+          MockClient((_) async => http.Response('{}', 200)),
+        ),
         communityStorageProvider.overrideWithValue(storage),
         communitySnapshotWriterProvider.overrideWithValue((_) async {}),
         pendingDeepLinkProvider.overrideWith(
@@ -291,6 +347,9 @@ void main() {
     );
     final container = ProviderContainer(
       overrides: [
+        inviteJoinHttpClientProvider.overrideWithValue(
+          MockClient((_) async => http.Response('{}', 200)),
+        ),
         communityStorageProvider.overrideWithValue(_ThrowingCommunityStorage()),
         pendingDeepLinkProvider.overrideWith(
           () => _FakePendingDeepLinkNotifier(link),
@@ -331,6 +390,9 @@ void main() {
     final pending = _RecordingPendingDeepLinkNotifier(link);
     final container = ProviderContainer(
       overrides: [
+        inviteJoinHttpClientProvider.overrideWithValue(
+          MockClient((_) async => http.Response('{}', 200)),
+        ),
         communityStorageProvider.overrideWithValue(storage),
         pendingDeepLinkProvider.overrideWith(() => pending),
         channelsProvider.overrideWith(
@@ -364,6 +426,9 @@ void main() {
     );
     final container = ProviderContainer(
       overrides: [
+        inviteJoinHttpClientProvider.overrideWithValue(
+          MockClient((_) async => http.Response('{}', 200)),
+        ),
         pendingDeepLinkProvider.overrideWith(
           () => _FakePendingDeepLinkNotifier(link),
         ),
@@ -409,6 +474,9 @@ void main() {
       final recovery = _DeferredInviteJoinRecovery();
       final container = ProviderContainer(
         overrides: [
+          inviteJoinHttpClientProvider.overrideWithValue(
+            MockClient((_) async => http.Response('{}', 200)),
+          ),
           communityStorageProvider.overrideWithValue(storage),
           pendingDeepLinkProvider.overrideWith(
             () => _FakePendingDeepLinkNotifier(
@@ -483,6 +551,9 @@ void main() {
     final recovery = _DeferredInviteJoinRecovery();
     final container = ProviderContainer(
       overrides: [
+        inviteJoinHttpClientProvider.overrideWithValue(
+          MockClient((_) async => http.Response('{}', 200)),
+        ),
         communityStorageProvider.overrideWithValue(storage),
         pendingDeepLinkProvider.overrideWith(
           () => _FakePendingDeepLinkNotifier(
@@ -533,6 +604,9 @@ void main() {
     final pending = _QueuedPendingDeepLinkNotifier([first, second]);
     final container = ProviderContainer(
       overrides: [
+        inviteJoinHttpClientProvider.overrideWithValue(
+          MockClient((_) async => http.Response('{}', 200)),
+        ),
         communityStorageProvider.overrideWithValue(
           CommunityStorage(secure: FakeSecureStorage()),
         ),
@@ -578,6 +652,9 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
+          inviteJoinHttpClientProvider.overrideWithValue(
+            MockClient((_) async => http.Response('{}', 200)),
+          ),
           communityStorageProvider.overrideWithValue(
             CommunityStorage(secure: FakeSecureStorage()),
           ),
@@ -619,6 +696,9 @@ void main() {
       final inviteStorage = CommunityStorage(secure: FakeSecureStorage());
       final inviteContainer = ProviderContainer(
         overrides: [
+          inviteJoinHttpClientProvider.overrideWithValue(
+            MockClient((_) async => http.Response('{}', 200)),
+          ),
           communityStorageProvider.overrideWithValue(inviteStorage),
           pendingDeepLinkProvider.overrideWith(
             () => _FakePendingDeepLinkNotifier(
@@ -650,6 +730,9 @@ void main() {
 
       final messageContainer = ProviderContainer(
         overrides: [
+          inviteJoinHttpClientProvider.overrideWithValue(
+            MockClient((_) async => http.Response('{}', 200)),
+          ),
           pendingDeepLinkProvider.overrideWith(
             () => _FakePendingDeepLinkNotifier(
               const MessageDeepLink(
@@ -691,6 +774,9 @@ void main() {
     );
     final container = ProviderContainer(
       overrides: [
+        inviteJoinHttpClientProvider.overrideWithValue(
+          MockClient((_) async => http.Response('{}', 200)),
+        ),
         pendingDeepLinkProvider.overrideWith(
           () => _FakePendingDeepLinkNotifier(invite),
         ),
@@ -786,7 +872,7 @@ class _SuccessfulInviteJoinNotifier extends InviteJoinNotifier {
   }
 
   @override
-  Future<void> confirmJoin() async {
+  Future<void> confirmJoin({String? acceptedPolicyVersion}) async {
     state = state.copyWith(
       status: InviteJoinStatus.success,
       focusChannelId: 'welcome-everyone-id',
