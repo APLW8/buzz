@@ -74,10 +74,14 @@ pub async fn handle_req(
 
                 let subs = conn.subscriptions.lock().await;
                 if !subs.contains_key(&sub_id) && subs.len() >= MAX_SUBSCRIPTIONS {
-                    conn.send(RelayMessage::closed(
+                    // A new ID has no old holder to retire, but a lost CLOSED
+                    // would leave the client waiting on a refused request.
+                    if !conn.send(RelayMessage::closed(
                         &sub_id,
                         "error: too many subscriptions",
-                    ));
+                    )) {
+                        conn.cancel.cancel();
+                    }
                     return;
                 }
 
@@ -499,7 +503,8 @@ pub async fn handle_req(
                     if e.is_statement_cancelled() {
                         return true;
                     }
-                    conn.send(RelayMessage::eose(&sub_id));
+                    super::close::send_if_owner(&sub_id, owner, RelayMessage::eose(&sub_id), &conn)
+                        .await;
                     return false;
                 }
             };
@@ -576,7 +581,7 @@ pub async fn handle_req(
                 }
 
                 let msg = RelayMessage::event(&sub_id, &stored.event);
-                if !conn.send(msg) {
+                if !super::close::send_if_owner(&sub_id, owner, msg, &conn).await {
                     return false;
                 }
                 total_sent += 1;
@@ -586,7 +591,7 @@ pub async fn handle_req(
             }
         }
 
-        conn.send(RelayMessage::eose(&sub_id));
+        super::close::send_if_owner(&sub_id, owner, RelayMessage::eose(&sub_id), &conn).await;
 
         debug!(
             conn_id = %conn_id,
@@ -784,7 +789,7 @@ async fn handle_search_req(
     if build_search_channel_scope_filter(implicit_channels, include_global).is_none()
         && named_only.is_empty()
     {
-        conn.send(RelayMessage::eose(sub_id));
+        super::close::send_if_owner(sub_id, owner, RelayMessage::eose(sub_id), conn).await;
         return;
     }
 
@@ -988,7 +993,8 @@ async fn handle_search_req(
                     if !seen_ids.insert(stored.event.id) {
                         continue;
                     }
-                    if !conn.send(RelayMessage::event(sub_id, &stored.event)) {
+                    let frame = RelayMessage::event(sub_id, &stored.event);
+                    if !super::close::send_if_owner(sub_id, owner, frame, conn).await {
                         return;
                     }
                     emitted += 1;
@@ -1001,7 +1007,7 @@ async fn handle_search_req(
         }
     }
 
-    conn.send(RelayMessage::eose(sub_id));
+    super::close::send_if_owner(sub_id, owner, RelayMessage::eose(sub_id), conn).await;
 }
 
 /// Convert a single NIP-01 filter into an [`EventQuery`] for the database.
@@ -1526,12 +1532,13 @@ async fn handle_huddle_liveness_req(
                 return;
             }
         };
-        if !conn.send(RelayMessage::event(sub_id, &event)) {
+        let frame = RelayMessage::event(sub_id, &event);
+        if !super::close::send_if_owner(sub_id, owner, frame, conn).await {
             return;
         }
     }
 
-    conn.send(RelayMessage::eose(sub_id));
+    super::close::send_if_owner(sub_id, owner, RelayMessage::eose(sub_id), conn).await;
 }
 
 /// Claim `sub_id` for a live REQ under the lifecycle lock: record a fresh
