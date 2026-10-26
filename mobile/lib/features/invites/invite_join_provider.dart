@@ -438,7 +438,7 @@ bool _requiresFreshInvite(Object error) {
 String _friendlyInviteError(Object error) {
   final message = error.toString();
   if (message.contains('invite_restricted')) {
-    return 'This account or the invite issuer is restricted in this community. Contact a community administrator. If the restriction is temporary, try again after it ends.';
+    return 'This account, or the account that owns it, is restricted in this community. Contact a community administrator. If the restriction is temporary, try again after it ends.';
   }
   if (message.contains('invite_owner_mismatch')) {
     return 'This account does not match its recorded owner. Use the correct account or owner identity to join this community.';

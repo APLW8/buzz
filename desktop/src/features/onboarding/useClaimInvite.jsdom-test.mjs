@@ -14,7 +14,7 @@ import { useClaimInvite } from "./useClaimInvite.ts";
 for (const [sentinel, guidance] of [
   [
     "invite_restricted",
-    "This account or the invite issuer is restricted in this community. Contact a community administrator. If the restriction is temporary, try again after it ends.",
+    "This account, or the account that owns it, is restricted in this community. Contact a community administrator. If the restriction is temporary, try again after it ends.",
   ],
   [
     "invite_owner_mismatch",
