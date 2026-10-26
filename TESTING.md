@@ -194,7 +194,7 @@ This change does not choose or deploy a cutoff.
 The historical maintenance companion must be separately reviewed and approved
 **before deploying this core change**. Both steps belong to the same controlled
 rollout: leaving unrepaired rows serving indefinitely would extend historical
-restriction rejection until their repair. Migration 0071 is schema-only: it adds
+restriction rejection until their repair. Migration 0072 is schema-only: it adds
 `revoked_at` and `legacy_admission` without rewriting existing invite rows.
 Reconcile any previously applied invitation migration version with the schema
 and migration history before applying it.
@@ -205,7 +205,7 @@ the drain/repair interval, including signed events, HTTP, administrative tools,
 background jobs and direct writers. If this cannot be enforced for every writer
 with existing operational controls, use a maintenance window: remove public
 traffic, stop all relay instances and other writers, drain in-flight work and
-verify no old writer remains. Keep them stopped while applying schema 0071 and
+verify no old writer remains. Keep them stopped while applying schema 0072 and
 running the separately approved repair with its isolated operator connection.
 Prepare only new-code instances; do not reopen traffic or restart other writers
 until repair validation succeeds. Readers that may run before repair must use

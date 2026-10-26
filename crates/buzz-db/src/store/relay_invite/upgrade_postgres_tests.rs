@@ -170,8 +170,8 @@ async fn legacy_fixture() -> (PgPool, Vec<LegacyInviteCase>) {
     let pool = PgPool::connect(&crate::test_support::database_url())
         .await
         .unwrap();
-    // Pinned main includes entity deletion approval in 0070; invitations expand in 0071.
-    crate::migration::run_migrations_through(&pool, 70)
+    // Pinned main includes the unlisted channel setting in 0071; invitations expand in 0072.
+    crate::migration::run_migrations_through(&pool, 71)
         .await
         .unwrap();
     let last_migration: i64 =
@@ -180,7 +180,7 @@ async fn legacy_fixture() -> (PgPool, Vec<LegacyInviteCase>) {
             .await
             .unwrap();
     assert_eq!(
-        last_migration, 70,
+        last_migration, 71,
         "fixtures start at the complete pinned-main schema"
     );
 
@@ -502,7 +502,7 @@ async fn apply_pgschema_to_existing_database(pool: &PgPool) {
 
 #[tokio::test]
 #[ignore = "requires Postgres"]
-async fn migration_schema_0071_adds_invite_columns_without_rewriting_history() {
+async fn migration_schema_0072_adds_invite_columns_without_rewriting_history() {
     let (pool, cases) = legacy_fixture().await;
     crate::migration::run_migrations(&pool).await.unwrap();
     assert_eq!(
@@ -510,7 +510,7 @@ async fn migration_schema_0071_adds_invite_columns_without_rewriting_history() {
             .fetch_one(&pool)
             .await
             .unwrap(),
-        71
+        72
     );
     assert_admission_column(&pool).await;
     assert_join_role_preserved(&pool, cases[0].community).await;
@@ -636,7 +636,7 @@ async fn migration_schema_desired_pgschema_reconcile_matches_populated_upgrade()
     assert_eq!(before, cases.len() as i64);
 
     // Exercise the deployment path against populated data at the complete
-    // pinned-main schema through 0070, rather than reproducing its DDL by hand.
+    // pinned-main schema through 0071, rather than reproducing its DDL by hand.
     apply_pgschema_to_existing_database(&pool).await;
     assert_admission_column(&pool).await;
     assert_join_role_preserved(&pool, cases[0].community).await;
