@@ -252,12 +252,13 @@ async fn webhook_admission_enforces_owner_ban_tenant_scope_and_lookup_failure() 
 
     let (state, audit_shutdown) = app_state(db.clone(), &pool).await;
 
-    let (status, _) = post_webhook(&state, workflow_id, &host_a, "wrong-secret").await;
+    let (status, body) = post_webhook(&state, workflow_id, &host_a, "wrong-secret").await;
     assert_eq!(
         status,
-        StatusCode::UNAUTHORIZED,
-        "the secret remains required"
+        StatusCode::NOT_FOUND,
+        "the secret remains required and is denied generically"
     );
+    assert_eq!(body["error"], "workflow not found");
     assert_eq!(workflow_run_count(&pool, community_a, workflow_id).await, 0);
 
     let (status, _) = post_webhook(&state, workflow_id, &host_a, &secret).await;
