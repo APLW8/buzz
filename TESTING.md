@@ -167,8 +167,10 @@ Rejected claims create no users or owner links.
 Minting with a verified owner that differs from an agent's recorded owner
 returns HTTP 403 `invite_owner_mismatch`; a storage failure while establishing
 that link remains HTTP 503. Web, desktop, and mobile claim errors explain
-`invite_restricted` as an account or issuer restriction in this community:
-contact a community administrator, or retry after a temporary restriction ends.
+`invite_restricted` as a restriction on the claiming account, or on the account
+that owns it, in this community: contact a community administrator, or retry
+after a temporary restriction ends. An issuer restriction returns
+`invite_invalid`, so a claim never reveals the issuer's moderation state.
 `invite_owner_mismatch` asks for the correct account or owner identity. Neither
 error suggests a fresh link as a workaround, and neither automatically retries.
 Claim and mint restriction reads use the writer inside a transaction serialized
