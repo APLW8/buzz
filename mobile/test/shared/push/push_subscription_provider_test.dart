@@ -89,6 +89,58 @@ void main() {
     expect(subscriptions.last.filter.hTags, [dmID, soloID, legacySoloID]);
   });
 
+  test('fills lease capacity with the most recent Solo chats', () {
+    final keys = nostr.Keys.generate();
+    String id(int n) =>
+        '123e4567-e89b-42d3-a456-${n.toRadixString(16).padLeft(12, '0')}';
+    Channel solo(int n) => channel(
+      id(n),
+      channelType: 'stream',
+      visibility: 'private',
+      labels: const ['buzz.solo'],
+      createdBy: keys.public,
+      lastMessageAt: DateTime(2026).add(Duration(minutes: n)),
+    );
+    const dmCount = 10;
+    const unmutedSolos = buzzPushMaxChannelWideChannels;
+    const mutedSolos = buzzPushMaxMutedChannels + 5;
+    final channels = [
+      for (var n = 0; n < dmCount; n++) channel(id(n)),
+      for (var n = dmCount; n < dmCount + unmutedSolos + mutedSolos; n++)
+        solo(n),
+    ];
+    final muted = [
+      for (var n = dmCount + unmutedSolos; n < channels.length; n++) id(n),
+    ];
+
+    final subscriptions = desiredBuzzPushSubscriptions(
+      community: Community.create(
+        name: 'Team',
+        relayUrl: 'https://relay.example.com',
+        nsec: keys.nsec,
+      ),
+      channels: channels,
+      mutedChannelIds: muted,
+    )!;
+
+    final followed = {
+      for (final subscription in subscriptions.skip(1))
+        ...?subscription.filter.hTags,
+    };
+    final ignoredMutes = {
+      for (final ignore in subscriptions.first.ignore.skip(1)) ...?ignore.hTags,
+    };
+    expect(subscriptions, hasLength(buzzPushMaxSubscriptions));
+    expect(followed, hasLength(buzzPushMaxChannelWideChannels));
+    expect(followed, containsAll([for (var n = 0; n < dmCount; n++) id(n)]));
+    expect(followed, contains(id(dmCount + unmutedSolos - 1)));
+    expect(followed, isNot(contains(id(dmCount + dmCount - 1))));
+    expect(followed, contains(id(dmCount + dmCount)));
+    expect(ignoredMutes, hasLength(buzzPushMaxMutedChannels));
+    expect(ignoredMutes, contains(id(channels.length - 1)));
+    expect(ignoredMutes, isNot(contains(id(dmCount + unmutedSolos))));
+  });
+
   test('waits for the Solo record but not past its failure', () async {
     const legacySoloID = '123e4567-e89b-42d3-a456-426614174009';
     final community = Community.create(
@@ -166,6 +218,7 @@ Channel channel(
   String visibility = 'open',
   List<String> labels = const [],
   String createdBy = 'author',
+  DateTime? lastMessageAt,
 }) => Channel(
   id: id,
   name: id,
@@ -178,6 +231,7 @@ Channel channel(
   memberCount: 1,
   isMember: isMember,
   archivedAt: archived ? DateTime(2026) : null,
+  lastMessageAt: lastMessageAt,
 );
 
 class _RecordingCommunityList extends CommunityListNotifier {

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 import '../../features/channels/channel.dart';
@@ -68,18 +69,68 @@ List<BuzzPushSubscription>? desiredBuzzPushSubscriptions({
   if (pubkey == null || pubkey.isEmpty) return null;
   return buildDesiredBuzzPushSubscriptions(
     myPubkey: pubkey,
-    channelIds: [
-      // Channel-wide traffic pushes only for joined DMs and the viewer's own
-      // Solo chats, which are conversations with them. Other channels push
-      // through an exact #p mention, so subscribing to every joined channel
-      // would over-notify.
-      for (final channel in channels)
-        if ((channel.isDm ||
-                channel.isPersonalChat(pubkey, legacySoloChannelIds)) &&
-            channel.isMember &&
-            !channel.isArchived)
-          channel.id,
-    ],
+    channelIds: _channelWideIds(
+      pubkey: pubkey,
+      channels: channels,
+      mutedChannelIds: mutedChannelIds,
+      legacySoloChannelIds: legacySoloChannelIds,
+    ),
     mutedChannelIds: mutedChannelIds,
   );
+}
+
+/// Channel-wide traffic pushes only for joined DMs and the viewer's own Solo
+/// chats, which are conversations with them. Other channels push through an
+/// exact #p mention, so subscribing to every joined channel would over-notify.
+///
+/// DMs always fit, as before. Solo chats fill the remaining lease capacity
+/// most recent first; the rest push only on mention.
+List<String> _channelWideIds({
+  required String pubkey,
+  required Iterable<Channel> channels,
+  required Iterable<String> mutedChannelIds,
+  required Iterable<String> legacySoloChannelIds,
+}) {
+  final muted = {for (final id in mutedChannelIds) id.toLowerCase()};
+  bool isMuted(String id) => muted.contains(id.toLowerCase());
+  final joined = [
+    for (final channel in channels)
+      if (channel.isMember && !channel.isArchived) channel,
+  ];
+  final ids = [
+    for (final channel in joined)
+      if (channel.isDm) channel.id,
+  ];
+  final solos = [
+    for (final channel in joined)
+      if (!channel.isDm && channel.isPersonalChat(pubkey, legacySoloChannelIds))
+        channel,
+  ]..sort(_mostRecentFirst);
+
+  var unmutedRoom =
+      buzzPushMaxChannelWideChannels - ids.where((id) => !isMuted(id)).length;
+  var mutedRoom = buzzPushMaxMutedChannels - ids.where(isMuted).length;
+  var omitted = 0;
+  for (final solo in solos) {
+    final soloMuted = isMuted(solo.id);
+    if ((soloMuted ? mutedRoom : unmutedRoom) <= 0) {
+      omitted++;
+      continue;
+    }
+    ids.add(solo.id);
+    soloMuted ? mutedRoom-- : unmutedRoom--;
+  }
+  if (omitted > 0) {
+    debugPrint(
+      'Push lease is full; $omitted older Solo chats push only on mention.',
+    );
+  }
+  return ids;
+}
+
+int _mostRecentFirst(Channel a, Channel b) {
+  final byRecency = (b.lastMessageAt ?? b.createdAt).compareTo(
+    a.lastMessageAt ?? a.createdAt,
+  );
+  return byRecency != 0 ? byRecency : a.id.compareTo(b.id);
 }
