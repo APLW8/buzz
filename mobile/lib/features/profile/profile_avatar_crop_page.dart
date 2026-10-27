@@ -40,7 +40,6 @@ class ProfileAvatarCropPage extends HookWidget {
     final dimensions = dimensionsData == null
         ? null
         : _ImageDimensions(dimensionsData[0], dimensionsData[1]);
-    final initializedForSize = useRef<Size?>(null);
     final cropGeometry = useRef<_CropGeometry?>(null);
     final displaySize = useRef<Size?>(null);
     final isClampingTransform = useRef(false);
@@ -206,6 +205,7 @@ class ProfileAvatarCropPage extends HookWidget {
                   final canvasWidth = constraints.maxWidth;
                   final canvasHeight = math.max(1.0, constraints.maxHeight);
                   final cropDiameter = math.min(canvasWidth, canvasHeight);
+                  final previousGeometry = cropGeometry.value;
                   cropGeometry.value = _CropGeometry(
                     canvasWidth: canvasWidth,
                     canvasHeight: canvasHeight,
@@ -219,9 +219,7 @@ class ProfileAvatarCropPage extends HookWidget {
                       ? cropDiameter
                       : cropDiameter / aspect;
                   displaySize.value = Size(displayWidth, displayHeight);
-                  final canvasSize = Size(canvasWidth, canvasHeight);
-                  if (initializedForSize.value != canvasSize) {
-                    initializedForSize.value = canvasSize;
+                  if (previousGeometry == null) {
                     controller.value = Matrix4.identity()
                       ..translateByDouble(
                         (canvasWidth - displayWidth) / 2,
@@ -229,6 +227,27 @@ class ProfileAvatarCropPage extends HookWidget {
                         0,
                         1,
                       );
+                  } else if (previousGeometry.canvasWidth != canvasWidth ||
+                      previousGeometry.canvasHeight != canvasHeight ||
+                      previousGeometry.cropDiameter != cropDiameter) {
+                    // Display dimensions scale with the crop diameter. Keep
+                    // the same source-image point under the crop center and
+                    // retain zoom, so the selected source rectangle survives.
+                    final ratio = cropDiameter / previousGeometry.cropDiameter;
+                    final matrix = controller.value.clone();
+                    matrix.storage[12] =
+                        canvasWidth / 2 -
+                        (previousGeometry.canvasWidth / 2 -
+                                matrix.storage[12]) *
+                            ratio;
+                    matrix.storage[13] =
+                        canvasHeight / 2 -
+                        (previousGeometry.canvasHeight / 2 -
+                                matrix.storage[13]) *
+                            ratio;
+                    // The listener clamps against the new geometry. Scale is
+                    // unchanged, so cropScale remains synchronized as well.
+                    controller.value = matrix;
                   }
                   void movePhoto(Offset delta) {
                     unawaited(HapticFeedback.selectionClick());
