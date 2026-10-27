@@ -45,6 +45,7 @@ void main() {
     const otherSoloID = '123e4567-e89b-42d3-a456-426614174006';
     const streamID = '123e4567-e89b-42d3-a456-426614174007';
     const mutedSoloID = '123e4567-e89b-42d3-a456-426614174008';
+    const legacySoloID = '123e4567-e89b-42d3-a456-426614174009';
     Channel solo(String id, {String? createdBy, bool archived = false}) =>
         channel(
           id,
@@ -67,14 +68,16 @@ void main() {
         solo(otherSoloID, createdBy: 'author'),
         channel(streamID, channelType: 'stream', visibility: 'private'),
         solo(mutedSoloID),
+        channel(legacySoloID, channelType: 'stream', visibility: 'private'),
       ],
+      legacySoloChannelIds: const [legacySoloID],
       mutedChannelIds: const [mutedSoloID],
     );
 
     expect(subscriptions, hasLength(2));
     expect(subscriptions!.first.ignore.last.hTags, [mutedSoloID]);
     expect(subscriptions.last.filter.kinds, buzzPushChannelKinds);
-    expect(subscriptions.last.filter.hTags, [dmID, soloID]);
+    expect(subscriptions.last.filter.hTags, [dmID, soloID, legacySoloID]);
   });
 
   test('returns no desired subscriptions without a signing identity', () {

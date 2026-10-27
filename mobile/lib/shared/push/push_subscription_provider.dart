@@ -7,6 +7,7 @@ import '../../features/channels/channel_mutes/channel_mutes_provider.dart';
 import '../../features/channels/channels_provider.dart';
 import '../community/community.dart';
 import '../community/community_provider.dart';
+import '../me/me_sync.dart';
 import '../relay/relay_provider.dart';
 import 'push_subscription.dart';
 
@@ -24,9 +25,15 @@ final pushSubscriptionSyncProvider = Provider<void>((ref) {
     return;
   }
 
+  // Legacy Solo chats arrive with the encrypted Solo record. Until it loads,
+  // labelled Solo chats, DMs and mentions still push; the lease updates when
+  // the record arrives.
+  final legacySoloChannelIds =
+      ref.watch(meGroupsProvider).value?.channels ?? const <String>[];
   final subscriptions = desiredBuzzPushSubscriptions(
     community: active,
     channels: channels,
+    legacySoloChannelIds: legacySoloChannelIds,
     mutedChannelIds: [
       for (final entry in mutes.store.channels.entries)
         if (entry.value.muted) entry.key,
@@ -44,6 +51,7 @@ List<BuzzPushSubscription>? desiredBuzzPushSubscriptions({
   required Community community,
   required Iterable<Channel> channels,
   required Iterable<String> mutedChannelIds,
+  Iterable<String> legacySoloChannelIds = const [],
 }) {
   final pubkey = community.pubkey ?? pubkeyFromNsec(community.nsec);
   if (pubkey == null || pubkey.isEmpty) return null;
@@ -55,7 +63,8 @@ List<BuzzPushSubscription>? desiredBuzzPushSubscriptions({
       // through an exact #p mention, so subscribing to every joined channel
       // would over-notify.
       for (final channel in channels)
-        if ((channel.isDm || channel.isPersonalChat(pubkey, const [])) &&
+        if ((channel.isDm ||
+                channel.isPersonalChat(pubkey, legacySoloChannelIds)) &&
             channel.isMember &&
             !channel.isArchived)
           channel.id,
