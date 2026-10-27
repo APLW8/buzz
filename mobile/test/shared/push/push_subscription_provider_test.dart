@@ -24,6 +24,7 @@ void main() {
     () {
       final nsec = nostr.Keys.generate().nsec;
       final subscriptions = desiredBuzzPushSubscriptions(
+        descriptor: _relayDescriptor,
         community: Community.create(
           name: 'Team',
           relayUrl: 'https://relay.example.com',
@@ -65,6 +66,7 @@ void main() {
           archived: archived,
         );
     final subscriptions = desiredBuzzPushSubscriptions(
+      descriptor: _relayDescriptor,
       community: Community.create(
         name: 'Team',
         relayUrl: 'https://relay.example.com',
@@ -114,6 +116,7 @@ void main() {
     ];
 
     final subscriptions = desiredBuzzPushSubscriptions(
+      descriptor: _roomyDescriptor,
       community: Community.create(
         name: 'Team',
         relayUrl: 'https://relay.example.com',
@@ -141,6 +144,56 @@ void main() {
     expect(ignoredMutes, isNot(contains(id(dmCount + unmutedSolos))));
   });
 
+  test('keeps the most recent Solo chats that fit the lease plaintext', () {
+    final keys = nostr.Keys.generate();
+    String id(int n) =>
+        '123e4567-e89b-42d3-a456-${n.toRadixString(16).padLeft(12, '0')}';
+    const dmCount = 10;
+    const soloCount = 400;
+    final channels = [
+      for (var n = 0; n < dmCount; n++) channel(id(n)),
+      for (var n = dmCount; n < dmCount + soloCount; n++)
+        channel(
+          id(n),
+          channelType: 'stream',
+          visibility: 'private',
+          labels: const ['buzz.solo'],
+          createdBy: keys.public,
+          lastMessageAt: DateTime(2026).add(Duration(minutes: n)),
+        ),
+    ];
+    // The newest 100 Solo chats are muted, so every lease filter ignores them.
+    final muted = [
+      for (var n = dmCount + soloCount - 100; n < dmCount + soloCount; n++)
+        id(n),
+    ];
+
+    final subscriptions = desiredBuzzPushSubscriptions(
+      community: Community.create(
+        name: 'Team',
+        relayUrl: 'https://relay.example.com',
+        nsec: keys.nsec,
+      ),
+      descriptor: _relayDescriptor,
+      channels: channels,
+      mutedChannelIds: muted,
+    )!;
+
+    final kept = {
+      for (final subscription in subscriptions.skip(1))
+        ...?subscription.filter.hTags,
+      for (final ignore in subscriptions.first.ignore.skip(1)) ...?ignore.hTags,
+    };
+    expect(
+      buzzPushSubscriptionsFitLease(_relayDescriptor, subscriptions),
+      isTrue,
+    );
+    expect(kept, containsAll([for (var n = 0; n < dmCount; n++) id(n)]));
+    expect(kept, containsAll(muted));
+    expect(kept.length, lessThan(dmCount + soloCount));
+    expect(kept, isNot(contains(id(dmCount))));
+  });
+
   test('waits for the Solo record but not past its failure', () async {
     const legacySoloID = '123e4567-e89b-42d3-a456-426614174009';
     final community = Community.create(
@@ -156,7 +209,7 @@ void main() {
       overrides: [
         authProvider.overrideWith(_Authenticated.new),
         currentRelayPushDescriptorProvider.overrideWith(
-          (ref) async => _descriptor,
+          (ref) async => _relayDescriptor,
         ),
         activeCommunityProvider.overrideWith((ref) async => community),
         communityListProvider.overrideWith(() => communities),
@@ -198,6 +251,7 @@ void main() {
 
   test('returns no desired subscriptions without a signing identity', () {
     final subscriptions = desiredBuzzPushSubscriptions(
+      descriptor: _relayDescriptor,
       community: Community.create(
         name: 'Team',
         relayUrl: 'https://relay.example.com',
@@ -267,14 +321,28 @@ class _Authenticated extends AuthNotifier {
       const AuthState(status: AuthStatus.authenticated);
 }
 
-const _descriptor = BuzzPushLeaseDescriptor(
+/// Limits the relay advertises in NIP-11 (`crates/buzz-relay/src/nip11.rs`).
+const _relayDescriptor = BuzzPushLeaseDescriptor(
   origin: 'wss://relay.example',
   executorKeyId: 'key',
   executorPubkey: 'pubkey',
   transport: 'apns',
   maxLeaseTtlSeconds: 3600,
-  maxContentLength: 4096,
-  maxPlaintextLength: 4096,
-  maxEndpointLength: 2048,
+  maxContentLength: 65536,
+  maxPlaintextLength: 32768,
+  maxEndpointLength: 4096,
+  maxStringLength: 512,
+);
+
+/// Room for any lease the channel counts allow.
+const _roomyDescriptor = BuzzPushLeaseDescriptor(
+  origin: 'wss://relay.example',
+  executorKeyId: 'key',
+  executorPubkey: 'pubkey',
+  transport: 'apns',
+  maxLeaseTtlSeconds: 3600,
+  maxContentLength: 1 << 22,
+  maxPlaintextLength: 1 << 21,
+  maxEndpointLength: 4096,
   maxStringLength: 512,
 );

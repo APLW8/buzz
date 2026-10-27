@@ -17,6 +17,39 @@ const _maxLeaseLifetimeSeconds = 2592000;
 const _lowercaseHex64Pattern = r'^[0-9a-f]{64}$';
 const _installationIdPattern = r'^[0-9a-f]{32}$';
 
+/// Whether an active lease carrying [subscriptions] fits [descriptor]'s
+/// plaintext limit with any endpoint grant and generation it accepts.
+/// Publication still checks the ciphertext limit.
+bool buzzPushSubscriptionsFitLease(
+  BuzzPushLeaseDescriptor descriptor,
+  List<BuzzPushSubscription> subscriptions,
+) {
+  final plaintext = _activeLeasePlaintext(
+    descriptor: descriptor,
+    endpoint: 'x' * descriptor.maxEndpointLength,
+    generation: _maxSafeJsonInteger,
+    subscriptions: subscriptions,
+  );
+  return utf8.encode(plaintext).length <= descriptor.maxPlaintextLength;
+}
+
+String _activeLeasePlaintext({
+  required BuzzPushLeaseDescriptor descriptor,
+  required String endpoint,
+  required int generation,
+  required List<BuzzPushSubscription> subscriptions,
+}) => jsonEncode(<String, dynamic>{
+  'v': 1,
+  'origin': descriptor.origin,
+  'transport': descriptor.transport,
+  'endpoint': endpoint,
+  'generation': generation,
+  'active': true,
+  'subscriptions': [
+    for (final subscription in subscriptions) subscription.toJson(),
+  ],
+});
+
 class BuzzPushLeaseDescriptor {
   final String origin;
   final String executorKeyId;
@@ -297,18 +330,12 @@ Future<BuzzPushLeasePublication> publishBuzzDevPushLease({
     throw const FormatException('Endpoint grant is already expired');
   }
 
-  final plaintextMap = <String, dynamic>{
-    'v': 1,
-    'origin': descriptor.origin,
-    'transport': descriptor.transport,
-    'endpoint': grant.endpointGrant,
-    'generation': effectiveLeaseGeneration,
-    'active': true,
-    'subscriptions': [
-      for (final subscription in subscriptions) subscription.toJson(),
-    ],
-  };
-  final plaintext = jsonEncode(plaintextMap);
+  final plaintext = _activeLeasePlaintext(
+    descriptor: descriptor,
+    endpoint: grant.endpointGrant,
+    generation: effectiveLeaseGeneration,
+    subscriptions: subscriptions,
+  );
   if (utf8.encode(plaintext).length > descriptor.maxPlaintextLength) {
     throw const FormatException('lease plaintext exceeds the advertised limit');
   }
