@@ -174,7 +174,7 @@ WITH readable AS NOT MATERIALIZED (
     SELECT c.id FROM channels c
     WHERE c.community_id=$1 AND c.deleted_at IS NULL
       AND (c.channel_type::text=ANY($11) OR c.id=ANY($9))
-      AND (c.visibility='open' OR EXISTS (
+      AND ((c.visibility='open' AND (NOT c.unlisted OR c.id=ANY($9))) OR EXISTS (
         SELECT 1 FROM channel_members m WHERE m.community_id=c.community_id
         AND m.channel_id=c.id AND m.pubkey=$2 AND m.removed_at IS NULL))
 ), changes AS (

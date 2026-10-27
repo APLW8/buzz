@@ -421,3 +421,90 @@ async fn sync_current_intersects_known_ids_with_query_scope() {
         json!({"type":"remove","artifactId":excluded})
     );
 }
+
+#[tokio::test]
+#[ignore = "requires Postgres"]
+async fn incremental_unlisted_channels_require_membership_or_named_scope() {
+    let _guard = SERIAL.lock().await;
+    let f = fixture().await;
+    let id = Uuid::new_v4();
+    let event = f.revision(id, "create", None);
+    accept(&f, &event).await;
+    let (_, before) = f
+        .request_as(
+            &f.peer,
+            "/query",
+            json!([{"artifact":"incremental","query":query()}]),
+        )
+        .await;
+    assert_eq!(before["changes"][0]["event"]["id"], event.id.to_hex());
+    buzz_db::channel::update_channel(
+        &f.pool,
+        f.community,
+        f.home,
+        buzz_db::channel::ChannelUpdate {
+            unlisted: Some(true),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let (status, reset) = f
+        .request_as(
+            &f.peer,
+            "/query",
+            json!([{"artifact":"incremental","query":query(),"checkpoint":before["checkpoint"]}]),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(reset["reason"], "policy_changed");
+    for (scope, visible) in [
+        (query(), false),
+        (
+            json!({"artifact":"current","#type":["buzz.task"],"#h":[f.home]}),
+            true,
+        ),
+    ] {
+        let (status, page) = f
+            .request_as(
+                &f.peer,
+                "/query",
+                json!([{"artifact":"incremental","query":scope}]),
+            )
+            .await;
+        assert!(status.is_success(), "{page}");
+        assert_eq!(
+            page["changes"].as_array().unwrap().len(),
+            usize::from(visible)
+        );
+        let (status, current) = f.request_as(&f.peer, "/query", json!([{"artifact":"incremental","action":"current","query":scope,"artifactIds":[id]}])).await;
+        assert!(status.is_success(), "{current}");
+        assert_eq!(
+            current["changes"][0]["type"],
+            if visible { "upsert" } else { "remove" }
+        );
+    }
+    assert_eq!(
+        sync(&f, None).await["changes"][0]["event"]["id"],
+        event.id.to_hex()
+    );
+    buzz_db::channel::update_channel(
+        &f.pool,
+        f.community,
+        f.home,
+        buzz_db::channel::ChannelUpdate {
+            unlisted: Some(false),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let (_, listed) = f
+        .request_as(
+            &f.peer,
+            "/query",
+            json!([{"artifact":"incremental","query":query()}]),
+        )
+        .await;
+    assert_eq!(listed["changes"][0]["event"]["id"], event.id.to_hex());
+}

@@ -6,23 +6,23 @@ after the schema, indexes, and every serving writer are upgraded.
 
 ## Schema and indexes
 
-Migration `0070` adds columns with constant defaults, then changes the defaults
+Migration `0075` adds columns with constant defaults, then changes the defaults
 for future inserts. It does not rewrite existing rows or run a backfill.
 Old rows remain at the epoch timestamp. An initial read includes them.
 New application writers stamp every head change, grant, rejoin, removal,
-redaction, and move source. Old application updates do not maintain all these
+redaction, and move source. Changes to channel listing also require recovery. Old application updates do not maintain all these
 stamps, so mixed-version serving cannot advertise incremental correctness.
 
 For a populated database, first build the revision lookup index outside a
-transaction, before migration `0069`:
+transaction, before migration `0074`:
 
 ```sql
 CREATE INDEX CONCURRENTLY idx_artifact_revisions_artifact
     ON public.artifact_revisions (community_id, artifact_id);
 ```
 
-Apply `0069_artifact_revision_lookup.sql` in a transaction after that prebuild.
-Then apply `0070_artifact_sync_timestamps.sql` in a
+Apply `0074_artifact_revision_lookup.sql` in a transaction after that prebuild.
+Then apply `0075_artifact_sync_timestamps.sql` in a
 transaction with its lock and statement budgets. The migration is idempotent
 for this prebuild step. Then build these indexes outside a transaction:
 
@@ -38,15 +38,15 @@ CREATE INDEX CONCURRENTLY artifact_revisions_moves
     WHERE source_channel_id IS NOT NULL;
 ```
 
-Migration `0071` verifies each index definition and its valid, ready, and live
+Migration `0076` verifies each index definition and its valid, ready, and live
 flags. It refuses a populated table whose index is missing. A fresh empty
 database can build the indexes under the migration's short budgets.
-Migration `0069` also verifies the exact definition and all three flags.
+Migration `0074` also verifies the exact definition and all three flags.
 Remove an invalid index with `DROP INDEX CONCURRENTLY` before a new build.
 
 After all index builds succeed, run `buzz-admin migrate` with the target
-`DATABASE_URL`. It verifies and records `0069`, reapplies the idempotent `0070`,
-then verifies and records `0071`. Direct SQL application does not record the
+`DATABASE_URL`. It verifies and records `0074`, reapplies the idempotent `0075`,
+then verifies and records `0076`. Direct SQL application does not record the
 migration ledger.
 
 ## Enable and rollback

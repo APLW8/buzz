@@ -65,8 +65,8 @@ pub(super) fn predicates(
     if query.view == ArtifactView::Current {
         qb.push("JOIN artifact_heads a ON a.community_id=e.community_id AND a.event_id=e.id AND NOT a.deleted ");
     }
-    // A system channel is read only by a query whose `#h` names it
-    // (NIP-CL); malformed `#h` values name no channel.
+    // System channels and unlisted open channels require an explicit `#h`
+    // unless the reader is a member of the unlisted channel (NIP-CL).
     let named_channels: Vec<uuid::Uuid> = query
         .tags
         .iter()
@@ -78,8 +78,10 @@ pub(super) fn predicates(
     qb.push("WHERE e.community_id=").push_bind(community.as_uuid()).push(" AND e.kind=45010 AND e.deleted_at IS NULL AND EXISTS (SELECT 1 FROM channels c WHERE c.community_id=e.community_id AND c.id=e.channel_id AND c.deleted_at IS NULL AND (")
         .push(crate::store::channel::legacy_channel_type_sql("c.channel_type"))
         .push(" OR c.id=ANY(")
+        .push_bind(named_channels.clone())
+        .push(")) AND ((c.visibility='open' AND (NOT c.unlisted OR c.id=ANY(")
         .push_bind(named_channels)
-        .push(")) AND (c.visibility='open' OR EXISTS (SELECT 1 FROM channel_members m WHERE m.community_id=c.community_id AND m.channel_id=c.id AND m.pubkey=")
+        .push("))) OR EXISTS (SELECT 1 FROM channel_members m WHERE m.community_id=c.community_id AND m.channel_id=c.id AND m.pubkey=")
         .push_bind(reader.to_vec()).push(" AND m.removed_at IS NULL)))");
     tag_predicates(qb, query);
     if query.view == ArtifactView::Current {

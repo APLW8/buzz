@@ -118,6 +118,8 @@ Each signed `POST /query` request contains one filter. The query uses the
 same community, relay admission, channel access, and exact tag rules as an
 ordinary artifact read. The existing `current` and `history` array responses
 keep their format.
+Unlisted open channels require membership or an explicit `#h` scope.
+Known-ID reads do not bypass this rule.
 
 ```json
 [{"artifact":"incremental","query":{"artifact":"current","#type":["buzz.task"]}}]
