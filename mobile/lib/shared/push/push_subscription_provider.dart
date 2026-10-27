@@ -15,25 +15,25 @@ import 'push_setup_recovery.dart';
 /// the active identity, joined channels, and mute state. This is desired client
 /// policy only. Relay-accepted authority is introduced by lease publication.
 ///
-/// Yields the Solo chats the lease had no room for.
-final pushSubscriptionSyncProvider = FutureProvider.autoDispose<SoloOverflow>((
+/// Yields how many Solo chats the lease had no room for.
+final pushSubscriptionSyncProvider = FutureProvider.autoDispose<int>((
   ref,
 ) async {
   try {
     if (ref.watch(authProvider).value?.status != AuthStatus.authenticated) {
-      return _noOverflow;
+      return 0;
     }
     final active = ref.watch(activeCommunityProvider).value;
     final descriptor = ref.watch(currentRelayPushDescriptorProvider).value;
     if (active == null ||
         !active.pushNotificationsEnabled ||
         descriptor == null) {
-      return _noOverflow;
+      return 0;
     }
     final channels = ref.watch(channelsProvider).value;
     final mutes = ref.watch(channelMutesProvider);
     if (channels == null || !mutes.isReady) {
-      return _noOverflow;
+      return 0;
     }
 
     // Legacy Solo chats are listed only in the Solo record. Wait while it
@@ -41,7 +41,7 @@ final pushSubscriptionSyncProvider = FutureProvider.autoDispose<SoloOverflow>((
     // cached copy, keep DMs and mentions current; the Solo tab cannot list
     // those chats either, and recovery republishes them.
     final soloRecord = ref.watch(meGroupsProvider);
-    if (soloRecord.isLoading && !soloRecord.hasValue) return _noOverflow;
+    if (soloRecord.isLoading && !soloRecord.hasValue) return 0;
 
     final desired = desiredBuzzPushSubscriptions(
       community: active,
@@ -53,25 +53,19 @@ final pushSubscriptionSyncProvider = FutureProvider.autoDispose<SoloOverflow>((
           if (entry.value.muted) entry.key,
       ],
     );
-    if (desired == null) return _noOverflow;
+    if (desired == null) return 0;
     await ref
         .read(communityListProvider.notifier)
         .updateDesiredPushSubscriptions(active.id, desired.subscriptions);
-    return desired.overflow;
+    return desired.omittedSoloChats;
   } catch (error, stack) {
     reportPushSetupError('subscription synchronization', error, stack);
     rethrow;
   }
 }, retry: pushSetupRetry);
 
-/// Solo chats a lease had no room for, and how many of those are muted.
-/// Mentions in a muted one still notify, since its mute ignore did not fit.
-typedef SoloOverflow = ({int chats, int muted});
-
-const SoloOverflow _noOverflow = (chats: 0, muted: 0);
-
-/// The desired lease, and the Solo chats it had no room for.
-({List<BuzzPushSubscription> subscriptions, SoloOverflow overflow})?
+/// The desired lease, and how many Solo chats it had no room for.
+({List<BuzzPushSubscription> subscriptions, int omittedSoloChats})?
 desiredBuzzPushSubscriptions({
   required Community community,
   required BuzzPushLeaseDescriptor descriptor,
@@ -118,15 +112,9 @@ desiredBuzzPushSubscriptions({
     }
     fitting = low;
   }
-  final trimmed = candidates.solos.skip(fitting);
   return (
     subscriptions: lease(fitting),
-    overflow: (
-      chats: candidates.omitted + trimmed.length,
-      muted:
-          candidates.omittedMuted +
-          trimmed.where((id) => muted.contains(id.toLowerCase())).length,
-    ),
+    omittedSoloChats: candidates.omitted + candidates.solos.length - fitting,
   );
 }
 
@@ -136,8 +124,7 @@ desiredBuzzPushSubscriptions({
 ///
 /// DMs always stay, as before. Solo chats follow most recent first, within the
 /// lease's channel counts; the rest push only on mention.
-({List<String> dms, List<String> solos, int omitted, int omittedMuted})
-_channelWideCandidates({
+({List<String> dms, List<String> solos, int omitted}) _channelWideCandidates({
   required String pubkey,
   required Iterable<Channel> channels,
   required Set<String> muted,
@@ -162,22 +149,13 @@ _channelWideCandidates({
       buzzPushMaxChannelWideChannels - dms.where((id) => !isMuted(id)).length;
   var mutedRoom = buzzPushMaxMutedChannels - dms.where(isMuted).length;
   final solos = <String>[];
-  var omittedMuted = 0;
   for (final solo in ordered) {
     final soloMuted = isMuted(solo.id);
-    if ((soloMuted ? mutedRoom : unmutedRoom) <= 0) {
-      if (soloMuted) omittedMuted++;
-      continue;
-    }
+    if ((soloMuted ? mutedRoom : unmutedRoom) <= 0) continue;
     solos.add(solo.id);
     soloMuted ? mutedRoom-- : unmutedRoom--;
   }
-  return (
-    dms: dms,
-    solos: solos,
-    omitted: ordered.length - solos.length,
-    omittedMuted: omittedMuted,
-  );
+  return (dms: dms, solos: solos, omitted: ordered.length - solos.length);
 }
 
 int _mostRecentFirst(Channel a, Channel b) {
