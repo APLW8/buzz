@@ -50,12 +50,15 @@ List<BuzzPushSubscription>? desiredBuzzPushSubscriptions({
   return buildDesiredBuzzPushSubscriptions(
     myPubkey: pubkey,
     channelIds: [
-      // Activity surfaces channel-wide traffic only for joined DM channels.
-      // Other message kinds enter the inbox through an exact #p mention or
-      // participant-thread tag, so subscribing to every joined channel would
-      // over-notify compared with the product predicate.
+      // Channel-wide traffic pushes only for joined DMs and the viewer's own
+      // Solo chats, which are conversations with them. Other channels push
+      // through an exact #p mention, so subscribing to every joined channel
+      // would over-notify.
       for (final channel in channels)
-        if (channel.isDm && channel.isMember && !channel.isArchived) channel.id,
+        if ((channel.isDm || channel.isPersonalChat(pubkey, const [])) &&
+            channel.isMember &&
+            !channel.isArchived)
+          channel.id,
     ],
     mutedChannelIds: mutedChannelIds,
   );

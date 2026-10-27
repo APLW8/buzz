@@ -37,6 +37,43 @@ void main() {
     },
   );
 
+  test('subscribes channel-wide to joined DMs and own Solo chats only', () {
+    final keys = nostr.Keys.generate();
+    const dmID = '123e4567-e89b-42d3-a456-426614174003';
+    const soloID = '123e4567-e89b-42d3-a456-426614174004';
+    const archivedSoloID = '123e4567-e89b-42d3-a456-426614174005';
+    const otherSoloID = '123e4567-e89b-42d3-a456-426614174006';
+    const streamID = '123e4567-e89b-42d3-a456-426614174007';
+    Channel solo(String id, {String? createdBy, bool archived = false}) =>
+        channel(
+          id,
+          channelType: 'stream',
+          visibility: 'private',
+          labels: const ['buzz.solo'],
+          createdBy: createdBy ?? keys.public,
+          archived: archived,
+        );
+    final subscriptions = desiredBuzzPushSubscriptions(
+      community: Community.create(
+        name: 'Team',
+        relayUrl: 'https://relay.example.com',
+        nsec: keys.nsec,
+      ),
+      channels: [
+        channel(dmID),
+        solo(soloID),
+        solo(archivedSoloID, archived: true),
+        solo(otherSoloID, createdBy: 'author'),
+        channel(streamID, channelType: 'stream', visibility: 'private'),
+      ],
+      mutedChannelIds: const [],
+    );
+
+    expect(subscriptions, hasLength(2));
+    expect(subscriptions!.last.filter.kinds, buzzPushChannelKinds);
+    expect(subscriptions.last.filter.hTags, [dmID, soloID]);
+  });
+
   test('returns no desired subscriptions without a signing identity', () {
     final subscriptions = desiredBuzzPushSubscriptions(
       community: Community.create(
@@ -51,16 +88,24 @@ void main() {
   });
 }
 
-Channel channel(String id, {bool isMember = true, bool archived = false}) =>
-    Channel(
-      id: id,
-      name: id,
-      channelType: 'dm',
-      visibility: 'open',
-      description: '',
-      createdBy: 'author',
-      createdAt: DateTime(2026),
-      memberCount: 1,
-      isMember: isMember,
-      archivedAt: archived ? DateTime(2026) : null,
-    );
+Channel channel(
+  String id, {
+  bool isMember = true,
+  bool archived = false,
+  String channelType = 'dm',
+  String visibility = 'open',
+  List<String> labels = const [],
+  String createdBy = 'author',
+}) => Channel(
+  id: id,
+  name: id,
+  channelType: channelType,
+  visibility: visibility,
+  labels: labels,
+  description: '',
+  createdBy: createdBy,
+  createdAt: DateTime(2026),
+  memberCount: 1,
+  isMember: isMember,
+  archivedAt: archived ? DateTime(2026) : null,
+);
