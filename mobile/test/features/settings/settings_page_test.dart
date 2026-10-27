@@ -171,8 +171,10 @@ void main() {
           savedPrefsProvider.overrideWithValue(prefs),
           activeCommunityProvider.overrideWith((ref) async => community),
           currentRelayPushDescriptorProvider.overrideWith((ref) => capability),
-          // The lease had no room for 12 older Solo chats.
-          pushSubscriptionSyncProvider.overrideWith((ref) async => 12),
+          // The lease had no room for 12 older Solo chats, 3 of them muted.
+          pushSubscriptionSyncProvider.overrideWith(
+            (ref) async => (chats: 12, muted: 3),
+          ),
           appLifecycleProvider.overrideWith(_SettingsLifecycleNotifier.new),
           buzzPushAuthorizationStatusReaderProvider.overrideWithValue(
             () async => BuzzPushAuthorizationStatus.authorized,
@@ -199,7 +201,10 @@ void main() {
       findsOneWidget,
     );
     expect(
-      find.text('12 chats are past this relay’s notification limit.'),
+      find.text(
+        '12 chats are past this relay’s notification limit. '
+        '3 of them are muted but still notify on mention.',
+      ),
       findsOneWidget,
     );
     debugDefaultTargetPlatformOverride = null;

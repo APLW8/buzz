@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:buzz/features/channels/channel.dart';
 import 'package:buzz/features/channels/channel_mutes/channel_mutes_provider.dart';
@@ -118,7 +119,7 @@ void main() {
     expect(followed, containsAll([for (var n = 0; n < dmCount; n++) _id(n)]));
     expect(followed, contains(_id(channels.length - 1)));
     expect(followed, isNot(contains(_id(dmCount + dmCount - 1))));
-    expect(desired.omittedSoloChats, dmCount);
+    expect(desired.overflow, (chats: dmCount, muted: 0));
 
     // A relay may advertise any endpoint limit; sizing must not allocate it.
     expect(
@@ -144,6 +145,12 @@ void main() {
       _descriptor(contentLength: 24000, plaintextLength: 32768),
       400,
       100,
+    ),
+    (
+      'content, trimming muted chats,',
+      _descriptor(contentLength: 24000, plaintextLength: 32768),
+      400,
+      300,
     ),
     ('muted channel count', _descriptor(), 400, 400),
     ('NIP-44 plaintext', _descriptor(), 600, 200),
@@ -175,8 +182,10 @@ void main() {
         for (final ignore in desired.subscriptions.first.ignore.skip(1))
           ...?ignore.hTags,
       };
-      final keptSolos = soloCount - desired.omittedSoloChats;
+      final keptSolos = soloCount - desired.overflow.chats;
       expect(keptSolos, inInclusiveRange(1, soloCount - 1));
+      // Omitted muted chats lose their mute ignore, so Settings counts them.
+      expect(desired.overflow.muted, math.max(0, mutedSolos - keptSolos));
       expect(kept, {
         for (var n = 0; n < dmCount; n++) _id(n),
         for (var n = channels.length - keptSolos; n < channels.length; n++)

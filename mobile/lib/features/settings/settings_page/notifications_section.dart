@@ -25,9 +25,9 @@ class _NotificationsSection extends ConsumerWidget {
       return const SizedBox.shrink();
     }
     final canToggle = hasCapability || community.pushNotificationsEnabled;
-    final omittedSoloChats = community.pushNotificationsEnabled
-        ? ref.watch(pushSubscriptionSyncProvider).value ?? 0
-        : 0;
+    final overflow = community.pushNotificationsEnabled
+        ? ref.watch(pushSubscriptionSyncProvider).value
+        : null;
 
     void setEnabled(bool enabled) {
       unawaited(
@@ -75,15 +75,26 @@ class _NotificationsSection extends ConsumerWidget {
             ],
           ),
         ),
-        if (omittedSoloChats > 0)
+        if (overflow != null && overflow.chats > 0)
           AppListRow(
             key: const ValueKey('push-solo-coverage'),
             title: 'Older Solo chats notify only on mention',
-            subtitle: omittedSoloChats == 1
-                ? '1 chat is past this relay’s notification limit.'
-                : '$omittedSoloChats chats are past this relay’s notification limit.',
+            subtitle: _soloOverflowText(overflow),
           ),
       ],
     );
   }
+}
+
+String _soloOverflowText(SoloOverflow overflow) {
+  final past = overflow.chats == 1
+      ? '1 chat is past this relay’s notification limit.'
+      : '${overflow.chats} chats are past this relay’s notification limit.';
+  if (overflow.muted == 0) return past;
+  if (overflow.chats == 1) {
+    return '$past It is muted but still notifies on mention.';
+  }
+  return overflow.muted == 1
+      ? '$past 1 of them is muted but still notifies on mention.'
+      : '$past ${overflow.muted} of them are muted but still notify on mention.';
 }
