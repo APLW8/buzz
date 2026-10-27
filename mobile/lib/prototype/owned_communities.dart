@@ -3,17 +3,18 @@ import '../shared/hosted/builderlab_account.dart';
 import '../shared/hosted/hosted_environment.dart';
 
 /// Validated, active communities owned by the signed-in Builderlab identity.
-/// Staging still exposes /list, while /joined returns 404 (2026-10-19).
-/// This explicit owner-only prototype path is not a fallback for normal builds.
+/// Used only by the explicit test-community creation flow. Agent creation and
+/// refresh use the current admitted community and do not require ownership.
 /// Discovery never grants admission; each target still goes through HostedAdmission.
 Future<List<AddCommunityDeepLink>> loadPrototypeOwnedCommunities(
   BuilderlabAccountClient account,
 ) async {
   if (!{
+    'app.builderlab.xyz',
     'app.builderlabstaging.xyz',
     'test.blockstaging.build',
   }.contains(HostedEnvironment.origin.host)) {
-    throw StateError('Owned-community prototype requires staging.');
+    throw StateError('Owned-community prototype requires a hosted account.');
   }
   final response = await account.post('/v1/buzz/communities/list', {});
   final rows = response['communities'];

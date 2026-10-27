@@ -24,7 +24,7 @@ import '../shared/emoji/emoji_avatar.dart';
 import '../shared/storage/secure_storage.dart';
 import '../shared/relay/signed_event_relay.dart';
 
-/// Staging-only experiment using the same account and Beekeeper contracts as desktop.
+/// Local experiment using the same account and Beekeeper contracts as desktop.
 class RemoteAgentController extends ChangeNotifier {
   RemoteAgentController({
     required this.account,
@@ -172,11 +172,12 @@ class RemoteAgentController extends ChangeNotifier {
 
   Future<void> _initialize() async {
     if (!{
+      'app.builderlab.xyz',
       'app.builderlabstaging.xyz',
       'test.blockstaging.build',
     }.contains(HostedEnvironment.origin.host)) {
       throw StateError(
-        'This prototype requires the staging build configuration.',
+        'This prototype requires a supported hosted build configuration.',
       );
     }
     _subscriptions.add(
@@ -231,10 +232,7 @@ class RemoteAgentController extends ChangeNotifier {
   }
 
   Future<bool> signIn() => run(() async {
-    status =
-        'Waiting for Mac Chrome. Open http://127.0.0.1:18763/start '
-        'on your Mac, then sign in to your public staging account. '
-        'This attempt expires after 10 minutes.';
+    status = 'Complete BuilderLab sign-in in the mobile browser.';
     notifyListeners();
     await browser.start({'type': 'remote-prototype'});
   });
@@ -242,39 +240,29 @@ class RemoteAgentController extends ChangeNotifier {
   Future<void> refresh() async {
     final session = account.account;
     if (session == null) {
-      status = 'Sign in to your staging BuilderLab account.';
-      return;
-    }
-    await adoptBoundIdentity();
-    owner = (await keys.read())?.pubkey;
-    _scope =
-        'remote-prototype:${HostedEnvironment.origin.host}:${session.subject}';
-    final prefs = await SharedPreferences.getInstance();
-    deletedAgents = prefs.getStringList('$_scope:deleted')?.toSet() ?? {};
-    avatarUrls = Map<String, String>.from(
-      jsonDecode(prefs.getString('$_scope:avatars') ?? '{}') as Map,
-    );
-    final raw = prefs.getString('$_scope:pending');
-    pending = raw == null
-        ? null
-        : Map<String, dynamic>.from(jsonDecode(raw) as Map);
-    if (pending?['hasInstructions'] == true) {
-      final instructions = await accountSecureStorage.read(
-        key: '$_scope:instructions:${pending!['request']}',
-      );
-      if (instructions == null) {
-        throw StateError('Saved agent instructions are unavailable.');
-      }
-      pending!['instructions'] = instructions;
-    }
-    if (owner == null) {
-      status = 'Import your existing Buzz identity to discover communities.';
+      status = 'Sign in to your BuilderLab account.';
       return;
     }
     await ensureBinding();
-    communities = await loadPrototypeOwnedCommunities(account);
+    final prefs = await SharedPreferences.getInstance();
+    // Agent creation uses the current admitted community, including communities
+    // joined by invitation. Owning a community is not an agent prerequisite.
+    communities = [
+      for (final saved in await CommunityStorage().loadAll())
+        if (saved.pubkey == owner &&
+            HostedEnvironment.supportsRelay(Uri.parse(saved.relayUrl)))
+          AddCommunityDeepLink(name: saved.name, relayUrl: saved.relayUrl),
+    ];
+    final current = community;
+    if (current != null &&
+        HostedEnvironment.supportsRelay(Uri.parse(current.relayUrl)) &&
+        !communities.any((saved) => saved.relayUrl == current.relayUrl)) {
+      communities.add(current);
+    }
     final selected =
-        pending?['community'] ?? prefs.getString('$_scope:community');
+        pending?['community'] ??
+        current?.relayUrl ??
+        prefs.getString('$_scope:community');
     community = communities.where((c) => c.relayUrl == selected).firstOrNull;
     if (community == null && communities.length == 1) {
       community = communities.single;
@@ -307,9 +295,18 @@ class RemoteAgentController extends ChangeNotifier {
   Future<bool> createTestCommunity() => run(() async {
     await ensureBinding();
     final subject = account.account!.subject;
-    await HostedCreateCommunity(
+    final created = await HostedCreateCommunity(
       'tomb-remote-prototype-20261016',
     ).provision(account, owner!, () => account.account?.subject == subject);
+    communities = await loadPrototypeOwnedCommunities(account);
+    community = communities
+        .where((item) => item.relayUrl == created.relayUrl)
+        .firstOrNull;
+    if (community == null) {
+      throw StateError(
+        'Created community is not available yet. Refresh to retry discovery.',
+      );
+    }
     await refresh();
     if (communities.isEmpty) {
       throw StateError(
@@ -319,6 +316,7 @@ class RemoteAgentController extends ChangeNotifier {
   });
 
   Future<void> selectCommunity(AddCommunityDeepLink value) async {
+    await ensureBinding();
     if (pending != null) {
       throw StateError('Finish the pending agent before changing community.');
     }
@@ -360,6 +358,28 @@ class RemoteAgentController extends ChangeNotifier {
     await adoptBoundIdentity();
     owner = (await keys.read())?.pubkey;
     if (owner == null) throw AccountIdentityFailure.absent;
+    final scope = _deletionScope;
+    if (_scope == scope) return;
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString('$scope:pending');
+    final restored = raw == null
+        ? null
+        : Map<String, dynamic>.from(jsonDecode(raw) as Map);
+    if (restored?['hasInstructions'] == true) {
+      final instructions = await accountSecureStorage.read(
+        key: '$scope:instructions:${restored!['request']}',
+      );
+      if (instructions == null) {
+        throw StateError('Saved agent instructions are unavailable.');
+      }
+      restored['instructions'] = instructions;
+    }
+    deletedAgents = prefs.getStringList('$scope:deleted')?.toSet() ?? {};
+    avatarUrls = Map<String, String>.from(
+      jsonDecode(prefs.getString('$scope:avatars') ?? '{}') as Map,
+    );
+    pending = restored;
+    _scope = scope;
   }
 
   Future<void> _savePending(Map<String, dynamic> value) async {
@@ -386,7 +406,7 @@ class RemoteAgentController extends ChangeNotifier {
   }) => run(() async {
     final selected = community;
     if (selected == null) {
-      throw StateError('Choose an existing staging community.');
+      throw StateError('Choose an existing community.');
     }
     if (!HostedEnvironment.supportsRelay(Uri.parse(selected.relayUrl))) {
       throw StateError('Unsupported community.');

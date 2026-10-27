@@ -6,7 +6,9 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:buzz/shared/hosted/account_identity_store.dart';
 import 'package:buzz/shared/hosted/builderlab_account.dart';
 import 'package:buzz/shared/hosted/browser_auth.dart';
+import 'package:buzz/shared/hosted/hosted_environment.dart';
 import 'package:buzz/shared/hosted/hosted_relay_auth.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nostr/nostr.dart' as nostr;
@@ -15,7 +17,65 @@ import 'package:buzz/shared/crypto/nip_oa.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  setUp(() => FlutterSecureStorage.setMockInitialValues({}));
+  setUp(() {
+    FlutterSecureStorage.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({});
+  });
+  test(
+    'late account sign-in refreshes agents in a joined non-owned community',
+    () async {
+      final key = nostr.Keys('0' * 63 + '1');
+      final store = AccountIdentityStore();
+      final account = _LateAccount(key.public);
+      final browser = _LocalBrowser();
+      final auth = HostedRelayAuth(account);
+      final controller = RemoteAgentController(
+        account: account,
+        browser: browser,
+        keys: store,
+        relayAuth: auth,
+      );
+      addTearDown(() {
+        controller.dispose();
+        auth.dispose();
+        account.dispose();
+      });
+      await controller.initialize();
+      expect(browser.initialized, isTrue);
+      expect(controller.status, 'Sign in to your BuilderLab account.');
+      expect(account.routes, isEmpty);
+
+      // Normal hosted onboarding owns login and persists the existing key in
+      // its account slot. The prototype must consume that same slot.
+      account.signedIn = true;
+      await store.forSubject('prototype-owner').create(key.nsec);
+      final joined = Community.create(
+        name: 'Invited event',
+        relayUrl: 'wss://event.${HostedEnvironment.communitySuffix}',
+        pubkey: key.public,
+        nsec: key.nsec,
+      );
+      await CommunityStorage().save(joined);
+      await controller.selectCommunity(
+        AddCommunityDeepLink(name: joined.name, relayUrl: joined.relayUrl),
+      );
+      await controller.refresh();
+      expect(account.routes, ['/v3/beekeeper/list-agents']);
+      expect(controller.owner, key.public);
+      expect(controller.community?.relayUrl, joined.relayUrl);
+      expect(controller.communities.single.relayUrl, joined.relayUrl);
+      expect(controller.agents.single['agent_name'], 'Existing remote');
+      expect(await store.read(), isNull);
+      final prefs = await SharedPreferences.getInstance();
+      expect(
+        prefs.getString(
+          'remote-prototype:${HostedEnvironment.origin.host}:prototype-owner:community',
+        ),
+        joined.relayUrl,
+      );
+      expect(prefs.getKeys().any((key) => key.startsWith('null:')), isFalse);
+    },
+  );
   test(
     'verified binding migrates legacy key without replacing original',
     () async {
@@ -150,4 +210,49 @@ class BoundAccount extends BuilderlabAccountClient {
   Future<Map<String, dynamic>> currentIdentity() async => {
     'identity': {'pubkey_hex': pubkey},
   };
+}
+
+class _LocalBrowser extends BrowserAuth {
+  bool initialized = false;
+  @override
+  Future<void> initialize() async => initialized = true;
+}
+
+class _LateAccount extends BuilderlabAccountClient {
+  _LateAccount(this.pubkey);
+  final String pubkey;
+  bool signedIn = false;
+  final routes = <String>[];
+  @override
+  BuilderlabAccount? get account => signedIn
+      ? BuilderlabAccount(
+          subject: 'prototype-owner',
+          expiresAt: DateTime.utc(2030),
+        )
+      : null;
+  @override
+  Future<BuilderlabAccount?> restore() async => account;
+  @override
+  Future<Map<String, dynamic>> currentIdentity() async => {
+    'identity': {'pubkey_hex': pubkey},
+  };
+  @override
+  Future<Map<String, dynamic>> post(
+    String path,
+    Map<String, dynamic> body,
+  ) async {
+    routes.add(path);
+    if (path != '/v3/beekeeper/list-agents') {
+      throw StateError('Agent refresh must not require community ownership.');
+    }
+    return {
+      'status': 1,
+      'agents': [
+        {
+          'agent_pubkey': nostr.Keys('0' * 63 + '2').public,
+          'agent_name': 'Existing remote',
+        },
+      ],
+    };
+  }
 }

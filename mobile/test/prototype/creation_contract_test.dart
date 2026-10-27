@@ -135,9 +135,9 @@ void main() {
       await keys.create(key.nsec);
       final account = _Registry(key.public);
       final controller = _Controller(account, keys)
-        ..community = const AddCommunityDeepLink(
+        ..community = AddCommunityDeepLink(
           name: 'Test',
-          relayUrl: 'wss://test.communities.public.builderlabstaging.xyz',
+          relayUrl: 'wss://test.${HostedEnvironment.communitySuffix}',
         );
       addTearDown(() {
         controller.dispose();
@@ -162,10 +162,14 @@ void main() {
       expect(controller.pending?['id'], 'agent');
       expect(controller.pending?['instructions'], 'Reply concisely.');
       final prefs = await SharedPreferences.getInstance();
+      final scope =
+          'remote-prototype:${HostedEnvironment.origin.host}:prototype-owner';
+      expect(prefs.getString('$scope:pending'), isNotNull);
       expect(
-        prefs.getString('null:pending'),
+        prefs.getString('$scope:pending'),
         isNot(contains('Reply concisely.')),
       );
+      expect(prefs.getKeys().any((key) => key.startsWith('null:')), isFalse);
       account.failInstructions = false;
       expect(
         await controller.create(
@@ -189,13 +193,10 @@ void main() {
         'Reply concisely.',
       );
       expect(controller.publishedAvatar, {'emoji': '🦉', 'color': '#476CFF'});
-      final persistedAvatars = prefs.getString('null:avatars');
+      final persistedAvatars = prefs.getString('$scope:avatars');
       expect(persistedAvatars, contains('data:image/svg+xml'));
       expect(persistedAvatars, isNot(contains('Reply concisely.')));
       expect(controller.pending, isNull);
     },
-    skip: HostedEnvironment.origin.host != 'app.builderlabstaging.xyz'
-        ? 'Run with the staging build define.'
-        : false,
   );
 }

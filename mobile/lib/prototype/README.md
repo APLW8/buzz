@@ -10,13 +10,13 @@ Entry point: `lib/main_prototype.dart`. Required build defines: `BUZZ_BUILDERLAB
 2. Tap **Agents**, immediately to the left of Search. The list is scoped to that community and pushes agent details within the same modal when an agent is selected.
 3. Tap **Add agent**, enter a display name and optional private instructions, then **Create**. Successful creation returns to the list. A failed attempt offers **Resume**, preserving its identity and instructions.
 4. Open an agent profile to copy its public key or **Message** it. Normal channel mention discovery and admission rules still apply.
-5. If signed out, use **Sign in** in Agents, then finish Mac Chrome login through `http://127.0.0.1:18763/start`. The loopback handoff expires after ten minutes and validates state and PKCE.
+5. If signed out, use **Sign in** in Agents, then complete the native mobile authentication sheet. Fresh simulator instructions are in [SIMULATOR_PROOF.md](SIMULATOR_PROOF.md).
 
 Remote availability is an explicit product presentation: exact keys returned ACTIVE by the authenticated Beekeeper registry show green Online in the profile, DM header/list and mention ranking (the Agents list shows names and avatars only). Beekeeper listens for messages and starts/resumes workers, so the worker's transient WebSocket presence is not its availability. Other agents and humans retain relay presence. This does not claim sandbox tool authorization or service-health guarantees.
 
 The current registry supports name and private instructions, via registration then activation then `update-agent`. It offers no harness or model selection. Instructions are stored in device-only secure storage while setup is pending, separately from public pending metadata.
 
-The prototype reuses an existing owner identity only after the current account binding confirms the same key. It adopts the saved key into the account-scoped slot without deleting the old record. New-community admission uses the shared encrypted-backup, binding verification, and relay probe services. Reopening an existing saved community verifies its key and current binding without redoing onboarding or replacing its record. It does not implement new-user identity selection or recovery UI. A debug-only native method transfers a one-time simulator launch environment value into device-only Keychain. It is compiled only for a debug simulator and checks the prototype bundle identifier. No key is embedded in source or build configuration.
+The prototype reuses an existing owner identity only after the current account binding confirms the same key. It adopts the saved key into the account-scoped slot without deleting the old record. New-community admission uses the shared encrypted-backup, binding verification, and relay probe services. Reopening an existing saved community verifies its key and current binding without redoing onboarding or replacing its record. It does not implement new-user identity selection or recovery UI.
 
 The agent's private key remains on BuilderLab. Activation uses the owner's NIP-OA authorization, explicitly subscribes the agent to the selected community, and publishes a relay listing with owner-only responses and parallelism 1. Attestation alone only reconciles server-configured communities, so it is insufficient for a newly created community. Pending setup contains public identifiers only and is scoped to the staging account.
 
@@ -85,8 +85,8 @@ Use an isolated personal-team identity, **com.tombrow.buzz.remoteprototype**,
 with its `.NotificationService` extension and matching App Group, team
 **DE7S2975CH**. Do not replace BuzzDev (`com.tombrow.buzz.mobile`), normal Buzz,
 or other prototypes. The entry point and staging defines above are unchanged.
-The debug identity-import channel and Mac Chrome bridge are simulator-only;
-physical builds use normal native browser authentication.
+Simulator and physical builds use normal native browser authentication.
+The former desktop Chrome bridge and debug identity-import channel were removed.
 
 Build with Xcode, not `flutter build`:
 
