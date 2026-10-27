@@ -139,22 +139,18 @@ desiredBuzzPushSubscriptions({
     for (final channel in joined)
       if (channel.isDm) channel.id,
   ];
+  // Muted Solo chats stay out, like muted channels, so they push only on
+  // mention.
   final ordered = [
     for (final channel in joined)
-      if (!channel.isDm && channel.isPersonalChat(pubkey, legacySoloChannelIds))
+      if (!channel.isDm &&
+          !isMuted(channel.id) &&
+          channel.isPersonalChat(pubkey, legacySoloChannelIds))
         channel,
   ]..sort(_mostRecentFirst);
-
-  var unmutedRoom =
+  final room =
       buzzPushMaxChannelWideChannels - dms.where((id) => !isMuted(id)).length;
-  var mutedRoom = buzzPushMaxMutedChannels - dms.where(isMuted).length;
-  final solos = <String>[];
-  for (final solo in ordered) {
-    final soloMuted = isMuted(solo.id);
-    if ((soloMuted ? mutedRoom : unmutedRoom) <= 0) continue;
-    solos.add(solo.id);
-    soloMuted ? mutedRoom-- : unmutedRoom--;
-  }
+  final solos = [for (final solo in ordered.take(room < 0 ? 0 : room)) solo.id];
   return (dms: dms, solos: solos, omitted: ordered.length - solos.length);
 }
 

@@ -87,8 +87,10 @@ void main() {
       mutedChannelIds: const [mutedSoloID],
     )?.subscriptions;
 
+    // A muted Solo chat is left out, like a muted channel, so only a
+    // mention pushes it.
     expect(subscriptions, hasLength(2));
-    expect(subscriptions!.first.ignore.last.hTags, [mutedSoloID]);
+    expect(subscriptions!.first.ignore, hasLength(1));
     expect(subscriptions.last.filter.kinds, buzzPushChannelKinds);
     expect(subscriptions.last.filter.hTags, [dmID, soloID, legacySoloID]);
   });
@@ -132,21 +134,14 @@ void main() {
     );
   });
 
-  for (final (limit, descriptor, soloCount, mutedSolos) in [
+  for (final (limit, descriptor, soloCount) in [
     (
       'plaintext',
-      _descriptor(contentLength: 65536, plaintextLength: 32768),
+      _descriptor(contentLength: 65536, plaintextLength: 16384),
       400,
-      100,
     ),
-    (
-      'content',
-      _descriptor(contentLength: 24000, plaintextLength: 32768),
-      400,
-      100,
-    ),
-    ('muted channel count', _descriptor(), 400, 400),
-    ('NIP-44 plaintext', _descriptor(), 600, 200),
+    ('content', _descriptor(contentLength: 24000, plaintextLength: 32768), 400),
+    ('NIP-44 plaintext', _descriptor(endpointLength: 40000), 700),
   ]) {
     test('keeps the newest Solo chats within the $limit limit', () async {
       final keys = nostr.Keys.generate();
@@ -156,24 +151,16 @@ void main() {
         for (var n = dmCount; n < dmCount + soloCount; n++)
           _solo(n, keys.public),
       ];
-      // Muted chats are the newest, so every lease filter ignores them.
-      final muted = [
-        for (var n = channels.length - mutedSolos; n < channels.length; n++)
-          _id(n),
-      ];
-
       final desired = desiredBuzzPushSubscriptions(
         community: _community(keys),
         descriptor: descriptor,
         channels: channels,
-        mutedChannelIds: muted,
+        mutedChannelIds: const [],
       )!;
 
       final kept = {
         for (final subscription in desired.subscriptions.skip(1))
           ...?subscription.filter.hTags,
-        for (final ignore in desired.subscriptions.first.ignore.skip(1))
-          ...?ignore.hTags,
       };
       final keptSolos = soloCount - desired.omittedSoloChats;
       expect(keptSolos, inInclusiveRange(1, soloCount - 1));
