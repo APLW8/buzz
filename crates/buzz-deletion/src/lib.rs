@@ -5,6 +5,9 @@
 /// Synthetic user-deletion request intake.
 pub mod user;
 
+/// In-process operator API for community deletion lookup and submission.
+pub mod community;
+
 use std::future::Future;
 #[cfg(test)]
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -711,7 +714,14 @@ async fn build_inventory(
         .store
         .inventory_schema(request.community_id)
         .await?;
-    let storage = enumerate_tenant_prefixes(services, request, heartbeat_lost, None).await?;
+    let storage = enumerate_tenant_prefixes(
+        &services.store,
+        &services.media,
+        request,
+        heartbeat_lost,
+        None,
+    )
+    .await?;
     Ok(FrozenInventory { schema, storage })
 }
 
@@ -722,12 +732,11 @@ struct ChunkSink<'a> {
     buffered: Vec<String>,
 }
 
-async fn flush_chunk(services: &Services, sink: &mut ChunkSink<'_>, prefix: &str) -> Result<()> {
+async fn flush_chunk(store: &DeletionStore, sink: &mut ChunkSink<'_>, prefix: &str) -> Result<()> {
     if sink.buffered.is_empty() {
         return Ok(());
     }
-    services
-        .store
+    store
         .append_manifest_key_chunk(sink.token, sink.next_chunk_no, prefix, &sink.buffered)
         .await?;
     sink.next_chunk_no += 1;
@@ -765,7 +774,8 @@ fn manifest_chunk_deleted_detail(
 /// (never spanning prefixes) for the destructive freeze to bind against these
 /// digests.
 async fn enumerate_tenant_prefixes(
-    services: &Services,
+    store: &DeletionStore,
+    media: &MediaStorage,
     request: &DeletionRequest,
     heartbeat_lost: Option<&CancellationToken>,
     mut sink: Option<&mut ChunkSink<'_>>,
@@ -782,8 +792,7 @@ async fn enumerate_tenant_prefixes(
             if heartbeat_lost.is_some_and(CancellationToken::is_cancelled) {
                 return Err(DeletionLeaseLost.into());
             }
-            let page = services
-                .media
+            let page = media
                 .list_prefix_versions_page(
                     &prefix,
                     key_marker.take(),
@@ -809,7 +818,7 @@ async fn enumerate_tenant_prefixes(
                 if let Some(sink) = sink.as_deref_mut() {
                     sink.buffered.push(encoded);
                     if sink.buffered.len() >= chunk_keys {
-                        flush_chunk(services, sink, &prefix).await?;
+                        flush_chunk(store, sink, &prefix).await?;
                     }
                 }
             }
@@ -824,7 +833,7 @@ async fn enumerate_tenant_prefixes(
             version_id_marker = Some(next_version_id_marker);
         }
         if let Some(sink) = sink.as_deref_mut() {
-            flush_chunk(services, sink, &prefix).await?;
+            flush_chunk(store, sink, &prefix).await?;
         }
         let (keys_digest, object_count) = digest.finish();
         prefixes.push(PrefixManifest {
@@ -960,8 +969,14 @@ async fn freeze_destructive_manifest(
         next_chunk_no: 0,
         buffered: Vec::new(),
     };
-    let manifest =
-        enumerate_tenant_prefixes(services, request, Some(heartbeat_lost), Some(&mut sink)).await?;
+    let manifest = enumerate_tenant_prefixes(
+        &services.store,
+        &services.media,
+        request,
+        Some(heartbeat_lost),
+        Some(&mut sink),
+    )
+    .await?;
     services
         .store
         .freeze_destructive_storage_manifest(token, &manifest)

@@ -19,6 +19,8 @@ use uuid::Uuid;
 use crate::error::{DbError, Result};
 use crate::Db;
 
+mod submission;
+
 /// Default PostgreSQL lease duration for one claimed deletion request.
 pub const DEFAULT_LEASE_DURATION: Duration = Duration::from_secs(60);
 /// Durable name of the schema manifest's PostgreSQL component.
