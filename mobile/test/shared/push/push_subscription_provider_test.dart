@@ -6,7 +6,9 @@ import 'package:buzz/features/channels/channels_provider.dart';
 import 'package:buzz/shared/auth/auth.dart';
 import 'package:buzz/shared/me/me_groups.dart';
 import 'package:buzz/shared/me/me_sync.dart';
+import 'package:buzz/shared/push/push_bridge.dart';
 import 'package:buzz/shared/push/push_subscription.dart';
+import 'package:buzz/shared/relay/nostr_models.dart';
 import 'package:buzz/shared/push/dev_push_lease.dart';
 import 'package:buzz/shared/push/push_relay_capability_provider.dart';
 import 'package:buzz/shared/push/push_subscription_provider.dart';
@@ -24,7 +26,7 @@ void main() {
     () {
       final nsec = nostr.Keys.generate().nsec;
       final subscriptions = desiredBuzzPushSubscriptions(
-        descriptor: _relayDescriptor,
+        descriptor: _descriptor(),
         community: Community.create(
           name: 'Team',
           relayUrl: 'https://relay.example.com',
@@ -36,7 +38,7 @@ void main() {
           channel(nonMemberID, isMember: false),
         ],
         mutedChannelIds: const [activeID, archivedID],
-      );
+      )?.subscriptions;
 
       expect(subscriptions, isNotNull);
       expect(subscriptions, hasLength(1));
@@ -66,7 +68,7 @@ void main() {
           archived: archived,
         );
     final subscriptions = desiredBuzzPushSubscriptions(
-      descriptor: _relayDescriptor,
+      descriptor: _descriptor(),
       community: Community.create(
         name: 'Team',
         relayUrl: 'https://relay.example.com',
@@ -83,7 +85,7 @@ void main() {
       ],
       legacySoloChannelIds: const [legacySoloID],
       mutedChannelIds: const [mutedSoloID],
-    );
+    )?.subscriptions;
 
     expect(subscriptions, hasLength(2));
     expect(subscriptions!.first.ignore.last.hTags, [mutedSoloID]);
@@ -91,108 +93,129 @@ void main() {
     expect(subscriptions.last.filter.hTags, [dmID, soloID, legacySoloID]);
   });
 
-  test('fills lease capacity with the most recent Solo chats', () {
+  test('fills the lease channel count with the most recent Solo chats', () {
     final keys = nostr.Keys.generate();
-    String id(int n) =>
-        '123e4567-e89b-42d3-a456-${n.toRadixString(16).padLeft(12, '0')}';
-    Channel solo(int n) => channel(
-      id(n),
-      channelType: 'stream',
-      visibility: 'private',
-      labels: const ['buzz.solo'],
-      createdBy: keys.public,
-      lastMessageAt: DateTime(2026).add(Duration(minutes: n)),
-    );
     const dmCount = 10;
-    const unmutedSolos = buzzPushMaxChannelWideChannels;
-    const mutedSolos = buzzPushMaxMutedChannels + 5;
+    const soloCount = buzzPushMaxChannelWideChannels;
     final channels = [
-      for (var n = 0; n < dmCount; n++) channel(id(n)),
-      for (var n = dmCount; n < dmCount + unmutedSolos + mutedSolos; n++)
-        solo(n),
-    ];
-    final muted = [
-      for (var n = dmCount + unmutedSolos; n < channels.length; n++) id(n),
+      for (var n = 0; n < dmCount; n++) channel(_id(n)),
+      for (var n = dmCount; n < dmCount + soloCount; n++) _solo(n, keys.public),
     ];
 
-    final subscriptions = desiredBuzzPushSubscriptions(
-      descriptor: _roomyDescriptor,
-      community: Community.create(
-        name: 'Team',
-        relayUrl: 'https://relay.example.com',
-        nsec: keys.nsec,
-      ),
+    final desired = desiredBuzzPushSubscriptions(
+      descriptor: _descriptor(),
+      community: _community(keys),
       channels: channels,
-      mutedChannelIds: muted,
+      mutedChannelIds: const [],
     )!;
 
     final followed = {
-      for (final subscription in subscriptions.skip(1))
+      for (final subscription in desired.subscriptions.skip(1))
         ...?subscription.filter.hTags,
     };
-    final ignoredMutes = {
-      for (final ignore in subscriptions.first.ignore.skip(1)) ...?ignore.hTags,
-    };
-    expect(subscriptions, hasLength(buzzPushMaxSubscriptions));
+    expect(desired.subscriptions, hasLength(buzzPushMaxSubscriptions));
     expect(followed, hasLength(buzzPushMaxChannelWideChannels));
-    expect(followed, containsAll([for (var n = 0; n < dmCount; n++) id(n)]));
-    expect(followed, contains(id(dmCount + unmutedSolos - 1)));
-    expect(followed, isNot(contains(id(dmCount + dmCount - 1))));
-    expect(followed, contains(id(dmCount + dmCount)));
-    expect(ignoredMutes, hasLength(buzzPushMaxMutedChannels));
-    expect(ignoredMutes, contains(id(channels.length - 1)));
-    expect(ignoredMutes, isNot(contains(id(dmCount + unmutedSolos))));
-  });
+    expect(followed, containsAll([for (var n = 0; n < dmCount; n++) _id(n)]));
+    expect(followed, contains(_id(channels.length - 1)));
+    expect(followed, isNot(contains(_id(dmCount + dmCount - 1))));
+    expect(desired.omittedSoloChats, dmCount);
 
-  test('keeps the most recent Solo chats that fit the lease plaintext', () {
-    final keys = nostr.Keys.generate();
-    String id(int n) =>
-        '123e4567-e89b-42d3-a456-${n.toRadixString(16).padLeft(12, '0')}';
-    const dmCount = 10;
-    const soloCount = 400;
-    final channels = [
-      for (var n = 0; n < dmCount; n++) channel(id(n)),
-      for (var n = dmCount; n < dmCount + soloCount; n++)
-        channel(
-          id(n),
-          channelType: 'stream',
-          visibility: 'private',
-          labels: const ['buzz.solo'],
-          createdBy: keys.public,
-          lastMessageAt: DateTime(2026).add(Duration(minutes: n)),
-        ),
-    ];
-    // The newest 100 Solo chats are muted, so every lease filter ignores them.
-    final muted = [
-      for (var n = dmCount + soloCount - 100; n < dmCount + soloCount; n++)
-        id(n),
-    ];
-
-    final subscriptions = desiredBuzzPushSubscriptions(
-      community: Community.create(
-        name: 'Team',
-        relayUrl: 'https://relay.example.com',
-        nsec: keys.nsec,
-      ),
-      descriptor: _relayDescriptor,
+    // A relay may advertise any endpoint limit; sizing must not allocate it.
+    final unbounded = desiredBuzzPushSubscriptions(
+      descriptor: _descriptor(endpointLength: 1 << 50),
+      community: _community(keys),
       channels: channels,
-      mutedChannelIds: muted,
+      mutedChannelIds: const [],
     )!;
-
-    final kept = {
-      for (final subscription in subscriptions.skip(1))
-        ...?subscription.filter.hTags,
-      for (final ignore in subscriptions.first.ignore.skip(1)) ...?ignore.hTags,
-    };
-    expect(
-      buzzPushSubscriptionsFitLease(_relayDescriptor, subscriptions),
-      isTrue,
-    );
-    expect(kept, containsAll([for (var n = 0; n < dmCount; n++) id(n)]));
-    expect(kept, containsAll(muted));
-    expect(kept.length, lessThan(dmCount + soloCount));
-    expect(kept, isNot(contains(id(dmCount))));
+    expect(unbounded.omittedSoloChats, soloCount);
   });
+
+  for (final (limit, descriptor, soloCount, mutedSolos) in [
+    (
+      'plaintext',
+      _descriptor(contentLength: 65536, plaintextLength: 32768),
+      400,
+      100,
+    ),
+    (
+      'content',
+      _descriptor(contentLength: 24000, plaintextLength: 32768),
+      400,
+      100,
+    ),
+    ('muted channel count', _descriptor(), 400, 400),
+    ('NIP-44 plaintext', _descriptor(), 600, 200),
+  ]) {
+    test('keeps the newest Solo chats within the $limit limit', () async {
+      final keys = nostr.Keys.generate();
+      const dmCount = 10;
+      final channels = [
+        for (var n = 0; n < dmCount; n++) channel(_id(n)),
+        for (var n = dmCount; n < dmCount + soloCount; n++)
+          _solo(n, keys.public),
+      ];
+      // Muted chats are the newest, so every lease filter ignores them.
+      final muted = [
+        for (var n = channels.length - mutedSolos; n < channels.length; n++)
+          _id(n),
+      ];
+
+      final desired = desiredBuzzPushSubscriptions(
+        community: _community(keys),
+        descriptor: descriptor,
+        channels: channels,
+        mutedChannelIds: muted,
+      )!;
+
+      final kept = {
+        for (final subscription in desired.subscriptions.skip(1))
+          ...?subscription.filter.hTags,
+        for (final ignore in desired.subscriptions.first.ignore.skip(1))
+          ...?ignore.hTags,
+      };
+      final keptSolos = soloCount - desired.omittedSoloChats;
+      expect(keptSolos, inInclusiveRange(1, soloCount - 1));
+      expect(kept, {
+        for (var n = 0; n < dmCount; n++) _id(n),
+        for (var n = channels.length - keptSolos; n < channels.length; n++)
+          _id(n),
+      });
+      // The relay accepts any grant up to its endpoint limit.
+      final publication = await publishBuzzDevPushLease(
+        grant: BuzzPushEndpointGrant(
+          relayOrigin: descriptor.origin,
+          relayPubkey: descriptor.executorPubkey,
+          installationId: 'c' * 32,
+          endpointGrant: 'x' * descriptor.maxEndpointLength,
+          endpointHash: 'd' * 64,
+          endpointEpoch: 1,
+          generation: 9007199254740991,
+          expiresAt: 1756212000,
+        ),
+        descriptor: descriptor,
+        nsec: keys.nsec,
+        memberPubkey: keys.public,
+        subscriptions: desired.subscriptions,
+        now: () => DateTime.fromMillisecondsSinceEpoch(1752620000 * 1000),
+        submit:
+            ({
+              required kind,
+              required content,
+              required tags,
+              createdAt,
+            }) async => const NostrEvent(
+              id: 'accepted-id',
+              pubkey: '',
+              createdAt: 0,
+              kind: 0,
+              tags: [],
+              content: '',
+              sig: '',
+            ),
+      );
+      expect(publication.eventId, 'accepted-id');
+    });
+  }
 
   test('waits for the Solo record but not past its failure', () async {
     const legacySoloID = '123e4567-e89b-42d3-a456-426614174009';
@@ -209,7 +232,7 @@ void main() {
       overrides: [
         authProvider.overrideWith(_Authenticated.new),
         currentRelayPushDescriptorProvider.overrideWith(
-          (ref) async => _relayDescriptor,
+          (ref) async => _descriptor(),
         ),
         activeCommunityProvider.overrideWith((ref) async => community),
         communityListProvider.overrideWith(() => communities),
@@ -251,7 +274,7 @@ void main() {
 
   test('returns no desired subscriptions without a signing identity', () {
     final subscriptions = desiredBuzzPushSubscriptions(
-      descriptor: _relayDescriptor,
+      descriptor: _descriptor(),
       community: Community.create(
         name: 'Team',
         relayUrl: 'https://relay.example.com',
@@ -321,28 +344,40 @@ class _Authenticated extends AuthNotifier {
       const AuthState(status: AuthStatus.authenticated);
 }
 
-/// Limits the relay advertises in NIP-11 (`crates/buzz-relay/src/nip11.rs`).
-const _relayDescriptor = BuzzPushLeaseDescriptor(
-  origin: 'wss://relay.example',
-  executorKeyId: 'key',
-  executorPubkey: 'pubkey',
-  transport: 'apns',
-  maxLeaseTtlSeconds: 3600,
-  maxContentLength: 65536,
-  maxPlaintextLength: 32768,
-  maxEndpointLength: 4096,
-  maxStringLength: 512,
+final _relayKeys = nostr.Keys.generate();
+
+String _id(int n) =>
+    '123e4567-e89b-42d3-a456-${n.toRadixString(16).padLeft(12, '0')}';
+
+Channel _solo(int n, String owner) => channel(
+  _id(n),
+  channelType: 'stream',
+  visibility: 'private',
+  labels: const ['buzz.solo'],
+  createdBy: owner,
+  lastMessageAt: DateTime(2026).add(Duration(minutes: n)),
 );
 
-/// Room for any lease the channel counts allow.
-const _roomyDescriptor = BuzzPushLeaseDescriptor(
+Community _community(nostr.Keys keys) => Community.create(
+  name: 'Team',
+  relayUrl: 'https://relay.example.com',
+  nsec: keys.nsec,
+);
+
+/// Defaults to no limit beyond NIP-44's own. The relay advertises 65536 and
+/// 32768 in NIP-11 (`crates/buzz-relay/src/nip11.rs`).
+BuzzPushLeaseDescriptor _descriptor({
+  int contentLength = 1 << 22,
+  int plaintextLength = 1 << 21,
+  int endpointLength = 4096,
+}) => BuzzPushLeaseDescriptor(
   origin: 'wss://relay.example',
   executorKeyId: 'key',
-  executorPubkey: 'pubkey',
+  executorPubkey: _relayKeys.public,
   transport: 'apns',
   maxLeaseTtlSeconds: 3600,
-  maxContentLength: 1 << 22,
-  maxPlaintextLength: 1 << 21,
-  maxEndpointLength: 4096,
+  maxContentLength: contentLength,
+  maxPlaintextLength: plaintextLength,
+  maxEndpointLength: endpointLength,
   maxStringLength: 512,
 );

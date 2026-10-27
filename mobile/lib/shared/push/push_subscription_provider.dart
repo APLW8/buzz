@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 
 import '../../features/channels/channel.dart';
@@ -15,24 +14,26 @@ import 'push_setup_recovery.dart';
 /// Keeps the persisted desired lease and the App Group snapshot aligned with
 /// the active identity, joined channels, and mute state. This is desired client
 /// policy only. Relay-accepted authority is introduced by lease publication.
-final pushSubscriptionSyncProvider = FutureProvider.autoDispose<void>((
+///
+/// Yields how many Solo chats the lease had no room for.
+final pushSubscriptionSyncProvider = FutureProvider.autoDispose<int>((
   ref,
 ) async {
   try {
     if (ref.watch(authProvider).value?.status != AuthStatus.authenticated) {
-      return;
+      return 0;
     }
     final active = ref.watch(activeCommunityProvider).value;
     final descriptor = ref.watch(currentRelayPushDescriptorProvider).value;
     if (active == null ||
         !active.pushNotificationsEnabled ||
         descriptor == null) {
-      return;
+      return 0;
     }
     final channels = ref.watch(channelsProvider).value;
     final mutes = ref.watch(channelMutesProvider);
     if (channels == null || !mutes.isReady) {
-      return;
+      return 0;
     }
 
     // Legacy Solo chats are listed only in the Solo record. Wait while it
@@ -40,9 +41,9 @@ final pushSubscriptionSyncProvider = FutureProvider.autoDispose<void>((
     // cached copy, keep DMs and mentions current; the Solo tab cannot list
     // those chats either, and recovery republishes them.
     final soloRecord = ref.watch(meGroupsProvider);
-    if (soloRecord.isLoading && !soloRecord.hasValue) return;
+    if (soloRecord.isLoading && !soloRecord.hasValue) return 0;
 
-    final subscriptions = desiredBuzzPushSubscriptions(
+    final desired = desiredBuzzPushSubscriptions(
       community: active,
       descriptor: descriptor,
       channels: channels,
@@ -52,17 +53,20 @@ final pushSubscriptionSyncProvider = FutureProvider.autoDispose<void>((
           if (entry.value.muted) entry.key,
       ],
     );
-    if (subscriptions == null) return;
+    if (desired == null) return 0;
     await ref
         .read(communityListProvider.notifier)
-        .updateDesiredPushSubscriptions(active.id, subscriptions);
+        .updateDesiredPushSubscriptions(active.id, desired.subscriptions);
+    return desired.omittedSoloChats;
   } catch (error, stack) {
     reportPushSetupError('subscription synchronization', error, stack);
     rethrow;
   }
 }, retry: pushSetupRetry);
 
-List<BuzzPushSubscription>? desiredBuzzPushSubscriptions({
+/// The desired lease, and how many Solo chats it had no room for.
+({List<BuzzPushSubscription> subscriptions, int omittedSoloChats})?
+desiredBuzzPushSubscriptions({
   required Community community,
   required BuzzPushLeaseDescriptor descriptor,
   required Iterable<Channel> channels,
@@ -100,13 +104,10 @@ List<BuzzPushSubscription>? desiredBuzzPushSubscriptions({
     }
     fitting = low;
   }
-  final omitted = candidates.omitted + candidates.solos.length - fitting;
-  if (omitted > 0) {
-    debugPrint(
-      'Push lease is full; $omitted older Solo chats push only on mention.',
-    );
-  }
-  return lease(fitting);
+  return (
+    subscriptions: lease(fitting),
+    omittedSoloChats: candidates.omitted + candidates.solos.length - fitting,
+  );
 }
 
 /// Channel-wide traffic pushes only for joined DMs and the viewer's own Solo

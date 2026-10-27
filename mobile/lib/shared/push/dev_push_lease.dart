@@ -18,19 +18,28 @@ const _lowercaseHex64Pattern = r'^[0-9a-f]{64}$';
 const _installationIdPattern = r'^[0-9a-f]{32}$';
 
 /// Whether an active lease carrying [subscriptions] fits [descriptor]'s
-/// plaintext limit with any endpoint grant and generation it accepts.
-/// Publication still checks the ciphertext limit.
+/// plaintext and content limits with any endpoint grant and generation it
+/// accepts. Sizes are computed, not built, since the limits come from the relay.
 bool buzzPushSubscriptionsFitLease(
   BuzzPushLeaseDescriptor descriptor,
   List<BuzzPushSubscription> subscriptions,
 ) {
-  final plaintext = _activeLeasePlaintext(
-    descriptor: descriptor,
-    endpoint: 'x' * descriptor.maxEndpointLength,
-    generation: _maxSafeJsonInteger,
-    subscriptions: subscriptions,
-  );
-  return utf8.encode(plaintext).length <= descriptor.maxPlaintextLength;
+  final withoutEndpoint = utf8
+      .encode(
+        _activeLeasePlaintext(
+          descriptor: descriptor,
+          endpoint: '',
+          generation: _maxSafeJsonInteger,
+          subscriptions: subscriptions,
+        ),
+      )
+      .length;
+  // A grant at the endpoint limit that needs no JSON escaping adds exactly it.
+  final plaintext = withoutEndpoint + descriptor.maxEndpointLength;
+  final content = nip44PayloadLength(plaintext);
+  return plaintext <= descriptor.maxPlaintextLength &&
+      content != null &&
+      content <= descriptor.maxContentLength;
 }
 
 String _activeLeasePlaintext({
