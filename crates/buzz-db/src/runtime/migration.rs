@@ -546,6 +546,7 @@ mod postgres_tests {
             "entity_deletion_approvals",
             "entity_deletion_requests",
             "entity_deletion_stage_history",
+            "user_deletion_fences",
             "community_deletion_approvals",
             "community_deletion_checkpoints",
             "community_deletion_manifest_keys",
@@ -772,7 +773,8 @@ mod postgres_tests {
         let mut migrations: Vec<_> = MIGRATOR.iter().collect();
         migrations.sort_by_key(|migration| migration.version);
 
-        assert_eq!(migrations.len(), 73);
+        assert_eq!(migrations.len(), 74);
+        assert_eq!(migrations[73].version, 74);
         assert_eq!(migrations[72].version, 73);
         assert_eq!(migrations[71].version, 72);
         assert_eq!(migrations[70].version, 71);
@@ -2902,6 +2904,7 @@ mod postgres_tests {
             "entity_deletion_approvals",
             "entity_deletion_requests",
             "entity_deletion_stage_history",
+            "user_deletion_fences",
         ] {
             assert_eq!(
                 columns(&desired, table).await,
@@ -2938,6 +2941,7 @@ mod postgres_tests {
         for table in [
             "entity_deletion_requests",
             "entity_deletion_stage_history",
+            "user_deletion_fences",
             "entity_deletion_approvals",
         ] {
             assert_eq!(
