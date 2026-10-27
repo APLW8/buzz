@@ -7,6 +7,8 @@ use url::Url;
 // MiB covers two maximally escaped documents plus the response envelope.
 const MAX_JOIN_POLICY_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 const JOIN_POLICY_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+const NOT_A_COMMUNITY_ERROR: &str =
+    "That URL didn't respond like a Buzz community. Check the link and try again.";
 
 fn join_policy_url(relay_url: &str) -> Result<Url, String> {
     let mut url = Url::parse(relay_url.trim()).map_err(|_| "invalid relay URL".to_string())?;
@@ -76,7 +78,7 @@ async fn read_join_policy_json(response: reqwest::Response) -> Result<Value, Str
         bytes.extend_from_slice(&chunk);
     }
 
-    serde_json::from_slice(&bytes).map_err(|_| "relay returned malformed join policy".to_string())
+    serde_json::from_slice(&bytes).map_err(|_| NOT_A_COMMUNITY_ERROR.to_string())
 }
 
 #[cfg(test)]
@@ -152,6 +154,20 @@ mod tests {
         .await;
 
         assert_eq!(fetch_join_policy(relay_url).await.unwrap_err(), "HTTP 307");
+    }
+
+    #[tokio::test]
+    async fn explains_a_web_page_that_is_not_a_relay() {
+        let relay_url = test_relay(Router::new().route(
+            "/api/join-policy",
+            get(|| async { "<!doctype html><title>Home</title>" }),
+        ))
+        .await;
+
+        assert_eq!(
+            fetch_join_policy(relay_url).await.unwrap_err(),
+            NOT_A_COMMUNITY_ERROR
+        );
     }
 
     #[tokio::test]

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { getJoinPolicy, mintInvite } from "./invites.ts";
+import { getJoinPolicy, mintInvite, NOT_A_COMMUNITY_ERROR } from "./invites.ts";
 
 function withFetch(response, run) {
   const originalFetch = globalThis.fetch;
@@ -50,6 +50,16 @@ test("getJoinPolicy preserves opt-in behavior for unconfigured and older relays"
 test("getJoinPolicy fails closed on a policy endpoint error", async () => {
   await withFetch(new Response(null, { status: 503 }), async () =>
     assert.rejects(getJoinPolicy("wss://relay.example", "webview"), /HTTP 503/),
+  );
+});
+
+test("getJoinPolicy explains a non-relay web page instead of a JSON parse error", async () => {
+  await withFetch(
+    new Response("<!doctype html><title>Home</title>", { status: 200 }),
+    async () =>
+      assert.rejects(getJoinPolicy("wss://relay.example", "webview"), {
+        message: NOT_A_COMMUNITY_ERROR,
+      }),
   );
 });
 

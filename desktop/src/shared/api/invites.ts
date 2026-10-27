@@ -21,6 +21,19 @@ const NIP98_KIND = 27235;
 // connect timeout (a minute or more on macOS).
 const INVITE_REQUEST_TIMEOUT_MS = 15_000;
 
+export const NOT_A_COMMUNITY_ERROR =
+  "That URL didn't respond like a Buzz community. Check the link and try again.";
+
+// A web page at the community URL (an HTML 200) makes WebKit's `json()` throw
+// the opaque "The string did not match the expected pattern."
+async function readRelayJson<T>(response: Response): Promise<T> {
+  try {
+    return (await response.json()) as T;
+  } catch {
+    throw new Error(NOT_A_COMMUNITY_ERROR);
+  }
+}
+
 export type MintedInvite = {
   code: string;
   expiresAt: number;
@@ -150,11 +163,8 @@ export async function getJoinPolicy(
     if (response.status === 404) return null;
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     raw =
-      (
-        (await response.json()) as {
-          policy?: RawJoinPolicy;
-        }
-      ).policy ?? null;
+      (await readRelayJson<{ policy?: RawJoinPolicy }>(response)).policy ??
+      null;
   }
   return raw
     ? {
@@ -187,7 +197,7 @@ export async function acceptJoinPolicy(
     },
   );
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return ((await response.json()) as { receipt: string }).receipt;
+  return (await readRelayJson<{ receipt: string }>(response)).receipt;
 }
 
 /** Mint an invite code on the active community's relay (owner/admin only). */
