@@ -2,11 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:duo_kit/duo_kit.dart';
-import '../../shared/widgets/duo_toolbar.dart';
-import '../../shared/widgets/ios_navigation_metrics.dart';
-import '../../shared/widgets/duo_workspace_scaffold.dart';
+import 'duo_toolbar.dart';
+import 'ios_navigation_metrics.dart';
+import 'duo_workspace_scaffold.dart';
 
-import '../../shared/theme/theme.dart';
+import '../theme/theme.dart';
 
 /// The active vertical fold, in window coordinates, when held like a book.
 Rect? bookDivisionOf(BuildContext context) {

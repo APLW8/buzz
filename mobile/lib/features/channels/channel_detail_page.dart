@@ -1,4 +1,4 @@
-import '../home/adaptive_conversation_pane.dart';
+import 'package:buzz/shared/widgets/adaptive_conversation_pane.dart';
 import 'message_swipe_reply.dart';
 import 'agent_reply_handoff.dart';
 import 'huddle_timeline.dart';

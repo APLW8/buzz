@@ -1,4 +1,4 @@
-import '../home/adaptive_conversation_pane.dart';
+import 'package:buzz/shared/widgets/adaptive_conversation_pane.dart';
 import 'channel_unread.dart';
 import '../../shared/widgets/collapsible_section_body.dart';
 import '../../shared/widgets/compose_morph_icon.dart';

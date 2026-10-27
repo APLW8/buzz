@@ -1,4 +1,4 @@
-import '../home/adaptive_conversation_pane.dart';
+import 'package:buzz/shared/widgets/adaptive_conversation_pane.dart';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';

@@ -1,4 +1,4 @@
-import '../home/adaptive_conversation_pane.dart';
+import 'package:buzz/shared/widgets/adaptive_conversation_pane.dart';
 import '../../shared/widgets/duo_toolbar.dart';
 import '../../shared/widgets/ios_navigation_bar.dart';
 import 'package:flutter/foundation.dart';

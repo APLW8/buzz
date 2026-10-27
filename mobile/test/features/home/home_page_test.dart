@@ -1,4 +1,4 @@
-import 'package:buzz/features/home/adaptive_conversation_pane.dart';
+import 'package:buzz/shared/widgets/adaptive_conversation_pane.dart';
 import 'package:buzz/features/activity/activity_page.dart';
 import 'package:buzz/shared/widgets/frosted_scaffold.dart';
 import 'package:buzz/shared/widgets/concentric_sheet_surface.dart';

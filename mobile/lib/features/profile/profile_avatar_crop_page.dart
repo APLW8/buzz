@@ -98,11 +98,12 @@ class ProfileAvatarCropPage extends HookWidget {
       return () => disposed = true;
     }, [imageBytes]);
 
+    final strip = defaultTargetPlatform == TargetPlatform.iOS
+        ? (DuoToolbarScope.maybeOf(context)?.strip ??
+              FoldGeometry.of(context).strip)
+        : null;
     return DuoToolbarPortal(
-      strip: defaultTargetPlatform == TargetPlatform.iOS
-          ? (DuoToolbarScope.maybeOf(context)?.strip ??
-                FoldGeometry.of(context).strip)
-          : null,
+      strip: strip,
       active:
           (DuoToolbarScope.maybeOf(context)?.active ?? true) &&
           (ModalRoute.isCurrentOf(context) ?? true),
@@ -128,19 +129,22 @@ class ProfileAvatarCropPage extends HookWidget {
               fontWeight: FontWeight.w600,
             ),
           ),
-          leadingWidth: 120,
-          leading: Padding(
-            padding: const EdgeInsets.only(left: Grid.gutter),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: _CropHeaderButton(
-                label: 'Cancel',
-                onPressed: isCropping.value
-                    ? null
-                    : () => Navigator.pop(context),
-              ),
-            ),
-          ),
+          automaticallyImplyLeading: false,
+          leadingWidth: strip == null ? 120 : null,
+          leading: strip != null
+              ? null
+              : Padding(
+                  padding: const EdgeInsets.only(left: Grid.gutter),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: _CropHeaderButton(
+                      label: 'Cancel',
+                      onPressed: isCropping.value
+                          ? null
+                          : () => Navigator.pop(context),
+                    ),
+                  ),
+                ),
           actions: [
             Padding(
               padding: const EdgeInsets.only(right: Grid.gutter),

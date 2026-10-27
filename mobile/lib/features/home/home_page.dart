@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'adaptive_conversation_pane.dart';
+import 'package:buzz/shared/widgets/adaptive_conversation_pane.dart';
 import '../../shared/community/community_provider.dart';
 import '../channels/channel_detail_page.dart';
 import 'dart:ui';
