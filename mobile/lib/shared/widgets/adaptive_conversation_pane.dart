@@ -3,6 +3,7 @@ import 'package:flutter_hooks/flutter_hooks.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:duo_kit/duo_kit.dart';
 import 'duo_toolbar.dart';
+import 'app_route_observer.dart';
 import 'ios_navigation_metrics.dart';
 import 'duo_workspace_scaffold.dart';
 
@@ -89,6 +90,7 @@ class AdaptiveConversationPane extends HookConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final routeObserver = useMemoized(appRouteObserver.createNestedObserver);
     final navigator = useMemoized(() => GlobalKey<NavigatorState>());
     return ConversationPaneScope(
       controller: controller,
@@ -193,6 +195,7 @@ class AdaptiveConversationPane extends HookConsumerWidget {
                                   },
                                   child: Navigator(
                                     key: navigator,
+                                    observers: [routeObserver],
                                     pages: [
                                       MaterialPage<void>(
                                         key: const ValueKey(
