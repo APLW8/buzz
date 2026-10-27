@@ -61,6 +61,9 @@ String _activeLeasePlaintext({
 
 class BuzzPushLeaseDescriptor {
   final String origin;
+
+  /// Canonical channel-ID grammar advertised by this relay.
+  final String hGrammar;
   final String executorKeyId;
   final String executorPubkey;
   final String transport;
@@ -72,6 +75,7 @@ class BuzzPushLeaseDescriptor {
 
   const BuzzPushLeaseDescriptor({
     required this.origin,
+    this.hGrammar = 'uuid-v4-lowercase',
     required this.executorKeyId,
     required this.executorPubkey,
     required this.transport,
@@ -157,7 +161,8 @@ class BuzzPushLeaseDescriptor {
       );
     }
     final hGrammar = _nonEmptyString(push['h_grammar'], name: 'h_grammar');
-    if (hGrammar != 'uuid-v4-lowercase') {
+    // Retain the advertised grammar so publication can enforce legacy limits.
+    if (hGrammar != 'uuid-lowercase' && hGrammar != 'uuid-v4-lowercase') {
       throw const FormatException('Unsupported push h_grammar');
     }
 
@@ -227,6 +232,7 @@ class BuzzPushLeaseDescriptor {
 
     return BuzzPushLeaseDescriptor(
       origin: origin,
+      hGrammar: hGrammar,
       executorKeyId: currentKey['id'] as String,
       executorPubkey: currentKey['pubkey'] as String,
       transport: transport,
@@ -236,6 +242,33 @@ class BuzzPushLeaseDescriptor {
       maxEndpointLength: limitation['max_endpoint_len'] as int,
       maxStringLength: maxStringLength,
     );
+  }
+}
+
+/// The desired lease requires channel IDs that this relay cannot accept yet.
+class BuzzPushChannelGrammarException implements Exception {
+  const BuzzPushChannelGrammarException();
+
+  @override
+  String toString() =>
+      'Push lease requires uuid-lowercase support from the relay';
+}
+
+/// Validate both positive and ignore filters without weakening mute semantics.
+void validateBuzzPushChannelGrammar(
+  BuzzPushLeaseDescriptor descriptor,
+  List<BuzzPushSubscription> subscriptions,
+) {
+  if (descriptor.hGrammar == 'uuid-lowercase') return;
+  for (final subscription in subscriptions) {
+    for (final filter in [subscription.filter, ...subscription.ignore]) {
+      for (final channel in filter.hTags ?? const <String>[]) {
+        // The legacy Rust validator checked version 4, not the UUID variant.
+        if (channel[14] != '4') {
+          throw const BuzzPushChannelGrammarException();
+        }
+      }
+    }
   }
 }
 
@@ -302,6 +335,7 @@ Future<BuzzPushLeasePublication> publishBuzzDevPushLease({
   required BuzzPushLeaseSubmit submit,
   DateTime Function() now = DateTime.now,
 }) async {
+  validateBuzzPushChannelGrammar(descriptor, subscriptions);
   _validateGrant(grant, descriptor);
   final effectiveLeaseInstallationId =
       leaseInstallationId ?? grant.installationId;
