@@ -189,6 +189,22 @@ void main() {
         desired.subscriptions,
       );
       expect(publication.eventId, 'accepted-id');
+      // A grant JSON must escape would outgrow the fit, so it never publishes.
+      await expectLater(
+        _publish(
+          descriptor,
+          keys,
+          desired.subscriptions,
+          endpointGrant: '"' * descriptor.maxEndpointLength,
+        ),
+        throwsA(
+          isA<FormatException>().having(
+            (error) => error.message,
+            'message',
+            'Endpoint grant is not a gateway grant',
+          ),
+        ),
+      );
     });
   }
 
@@ -395,13 +411,14 @@ BuzzPushLeaseDescriptor _descriptor({
 Future<BuzzPushLeasePublication> _publish(
   BuzzPushLeaseDescriptor descriptor,
   nostr.Keys keys,
-  List<BuzzPushSubscription> subscriptions,
-) => publishBuzzDevPushLease(
+  List<BuzzPushSubscription> subscriptions, {
+  String? endpointGrant,
+}) => publishBuzzDevPushLease(
   grant: BuzzPushEndpointGrant(
     relayOrigin: descriptor.origin,
     relayPubkey: descriptor.executorPubkey,
     installationId: 'c' * 32,
-    endpointGrant: 'x' * descriptor.maxEndpointLength,
+    endpointGrant: endpointGrant ?? 'x' * descriptor.maxEndpointLength,
     endpointHash: 'd' * 64,
     endpointEpoch: 1,
     generation: 9007199254740991,
