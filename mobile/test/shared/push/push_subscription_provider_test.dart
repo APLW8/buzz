@@ -121,13 +121,15 @@ void main() {
     expect(desired.omittedSoloChats, dmCount);
 
     // A relay may advertise any endpoint limit; sizing must not allocate it.
-    final unbounded = desiredBuzzPushSubscriptions(
-      descriptor: _descriptor(endpointLength: 1 << 50),
-      community: _community(keys),
-      channels: channels,
-      mutedChannelIds: const [],
-    )!;
-    expect(unbounded.omittedSoloChats, soloCount);
+    expect(
+      () => desiredBuzzPushSubscriptions(
+        descriptor: _descriptor(endpointLength: 1 << 50),
+        community: _community(keys),
+        channels: channels,
+        mutedChannelIds: const [],
+      ),
+      throwsFormatException,
+    );
   });
 
   for (final (limit, descriptor, soloCount, mutedSolos) in [
@@ -181,40 +183,48 @@ void main() {
           _id(n),
       });
       // The relay accepts any grant up to its endpoint limit.
-      final publication = await publishBuzzDevPushLease(
-        grant: BuzzPushEndpointGrant(
-          relayOrigin: descriptor.origin,
-          relayPubkey: descriptor.executorPubkey,
-          installationId: 'c' * 32,
-          endpointGrant: 'x' * descriptor.maxEndpointLength,
-          endpointHash: 'd' * 64,
-          endpointEpoch: 1,
-          generation: 9007199254740991,
-          expiresAt: 1756212000,
-        ),
-        descriptor: descriptor,
-        nsec: keys.nsec,
-        memberPubkey: keys.public,
-        subscriptions: desired.subscriptions,
-        now: () => DateTime.fromMillisecondsSinceEpoch(1752620000 * 1000),
-        submit:
-            ({
-              required kind,
-              required content,
-              required tags,
-              createdAt,
-            }) async => const NostrEvent(
-              id: 'accepted-id',
-              pubkey: '',
-              createdAt: 0,
-              kind: 0,
-              tags: [],
-              content: '',
-              sig: '',
-            ),
+      final publication = await _publish(
+        descriptor,
+        keys,
+        desired.subscriptions,
       );
       expect(publication.eventId, 'accepted-id');
     });
+  }
+
+  for (final (limit, descriptor) in [
+    ('content', _descriptor(contentLength: 100)),
+    ('plaintext', _descriptor(plaintextLength: 100)),
+  ]) {
+    test(
+      'fails setup when the $limit limit cannot fit DMs and mentions',
+      () async {
+        final keys = nostr.Keys.generate();
+        final channels = [channel(_id(0)), _solo(1, keys.public)];
+
+        // Publication rejects even the lease without Solo chats.
+        await expectLater(
+          _publish(
+            descriptor,
+            keys,
+            buildDesiredBuzzPushSubscriptions(
+              myPubkey: keys.public,
+              channelIds: [_id(0)],
+            ),
+          ),
+          throwsFormatException,
+        );
+        expect(
+          () => desiredBuzzPushSubscriptions(
+            community: _community(keys),
+            descriptor: descriptor,
+            channels: channels,
+            mutedChannelIds: const [],
+          ),
+          throwsFormatException,
+        );
+      },
+    );
   }
 
   test('waits for the Solo record but not past its failure', () async {
@@ -380,4 +390,36 @@ BuzzPushLeaseDescriptor _descriptor({
   maxPlaintextLength: plaintextLength,
   maxEndpointLength: endpointLength,
   maxStringLength: 512,
+);
+
+Future<BuzzPushLeasePublication> _publish(
+  BuzzPushLeaseDescriptor descriptor,
+  nostr.Keys keys,
+  List<BuzzPushSubscription> subscriptions,
+) => publishBuzzDevPushLease(
+  grant: BuzzPushEndpointGrant(
+    relayOrigin: descriptor.origin,
+    relayPubkey: descriptor.executorPubkey,
+    installationId: 'c' * 32,
+    endpointGrant: 'x' * descriptor.maxEndpointLength,
+    endpointHash: 'd' * 64,
+    endpointEpoch: 1,
+    generation: 9007199254740991,
+    expiresAt: 1756212000,
+  ),
+  descriptor: descriptor,
+  nsec: keys.nsec,
+  memberPubkey: keys.public,
+  subscriptions: subscriptions,
+  now: () => DateTime.fromMillisecondsSinceEpoch(1752620000 * 1000),
+  submit: ({required kind, required content, required tags, createdAt}) async =>
+      const NostrEvent(
+        id: 'accepted-id',
+        pubkey: '',
+        createdAt: 0,
+        kind: 0,
+        tags: [],
+        content: '',
+        sig: '',
+      ),
 );

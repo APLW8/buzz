@@ -92,6 +92,14 @@ desiredBuzzPushSubscriptions({
   // Each Solo chat only adds bytes, so keep the most recent ones that fit.
   var fitting = candidates.solos.length;
   if (!buzzPushSubscriptionsFitLease(descriptor, lease(fitting))) {
+    // Without Solo chats only DMs and mentions remain. A relay too small for
+    // those cannot carry push, so fail setup rather than save a lease that
+    // publication would reject.
+    if (!buzzPushSubscriptionsFitLease(descriptor, lease(0))) {
+      throw const FormatException(
+        'The relay push limits are too small for a lease.',
+      );
+    }
     var low = 0;
     var high = fitting - 1;
     while (low < high) {
