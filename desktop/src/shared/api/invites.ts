@@ -27,8 +27,9 @@ export const NOT_A_COMMUNITY_ERROR =
 // A web page at the community URL (an HTML 200) makes WebKit's `json()` throw
 // the opaque "The string did not match the expected pattern."
 async function readRelayJson<T>(response: Response): Promise<T> {
+  const body = await response.text();
   try {
-    return (await response.json()) as T;
+    return JSON.parse(body) as T;
   } catch {
     throw new Error(NOT_A_COMMUNITY_ERROR);
   }
