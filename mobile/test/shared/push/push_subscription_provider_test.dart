@@ -44,6 +44,7 @@ void main() {
     const archivedSoloID = '123e4567-e89b-42d3-a456-426614174005';
     const otherSoloID = '123e4567-e89b-42d3-a456-426614174006';
     const streamID = '123e4567-e89b-42d3-a456-426614174007';
+    const mutedSoloID = '123e4567-e89b-42d3-a456-426614174008';
     Channel solo(String id, {String? createdBy, bool archived = false}) =>
         channel(
           id,
@@ -65,12 +66,14 @@ void main() {
         solo(archivedSoloID, archived: true),
         solo(otherSoloID, createdBy: 'author'),
         channel(streamID, channelType: 'stream', visibility: 'private'),
+        solo(mutedSoloID),
       ],
-      mutedChannelIds: const [],
+      mutedChannelIds: const [mutedSoloID],
     );
 
     expect(subscriptions, hasLength(2));
-    expect(subscriptions!.last.filter.kinds, buzzPushChannelKinds);
+    expect(subscriptions!.first.ignore.last.hTags, [mutedSoloID]);
+    expect(subscriptions.last.filter.kinds, buzzPushChannelKinds);
     expect(subscriptions.last.filter.hTags, [dmID, soloID]);
   });
 
