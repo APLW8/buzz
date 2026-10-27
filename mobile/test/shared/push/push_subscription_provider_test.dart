@@ -3,11 +3,12 @@ import 'dart:async';
 import 'package:buzz/features/channels/channel.dart';
 import 'package:buzz/features/channels/channel_mutes/channel_mutes_provider.dart';
 import 'package:buzz/features/channels/channels_provider.dart';
-import 'package:buzz/shared/community/community.dart';
-import 'package:buzz/shared/community/community_provider.dart';
+import 'package:buzz/shared/auth/auth.dart';
 import 'package:buzz/shared/me/me_groups.dart';
 import 'package:buzz/shared/me/me_sync.dart';
 import 'package:buzz/shared/push/push_subscription.dart';
+import 'package:buzz/shared/push/dev_push_lease.dart';
+import 'package:buzz/shared/push/push_relay_capability_provider.dart';
 import 'package:buzz/shared/push/push_subscription_provider.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hooks_riverpod/hooks_riverpod.dart';
@@ -88,7 +89,7 @@ void main() {
     expect(subscriptions.last.filter.hTags, [dmID, soloID, legacySoloID]);
   });
 
-  test('waits for the Solo record before updating the desired lease', () async {
+  test('waits for the Solo record but not past its failure', () async {
     const legacySoloID = '123e4567-e89b-42d3-a456-426614174009';
     final community = Community.create(
       name: 'Team',
@@ -99,7 +100,12 @@ void main() {
     final soloRecord = StreamController<MeGroups>();
     addTearDown(soloRecord.close);
     final container = ProviderContainer(
+      retry: (_, _) => null,
       overrides: [
+        authProvider.overrideWith(_Authenticated.new),
+        currentRelayPushDescriptorProvider.overrideWith(
+          (ref) async => _descriptor,
+        ),
         activeCommunityProvider.overrideWith((ref) async => community),
         communityListProvider.overrideWith(() => communities),
         channelsProvider.overrideWith(
@@ -114,17 +120,25 @@ void main() {
     );
     addTearDown(container.dispose);
     container.listen(pushSubscriptionSyncProvider, (_, _) {});
+    await container.read(authProvider.future);
+    await container.read(currentRelayPushDescriptorProvider.future);
     await container.read(activeCommunityProvider.future);
     await container.read(channelsProvider.future);
     await pumpEventQueue();
 
     expect(communities.desired, isEmpty);
 
-    soloRecord.add(const MeGroups(channels: [legacySoloID]));
+    soloRecord.addError(StateError('Solo sync failed'));
     await pumpEventQueue();
 
     expect(communities.desired, hasLength(1));
-    expect(communities.desired.single.last.filter.hTags, [
+    expect(communities.desired.last.last.filter.hTags, [activeID]);
+
+    soloRecord.add(const MeGroups(channels: [legacySoloID]));
+    await pumpEventQueue();
+
+    expect(communities.desired, hasLength(2));
+    expect(communities.desired.last.last.filter.hTags, [
       activeID,
       legacySoloID,
     ]);
@@ -192,3 +206,21 @@ class _ReadyMutes extends ChannelMutesNotifier {
   @override
   ChannelMutesState build() => const ChannelMutesState(isReady: true);
 }
+
+class _Authenticated extends AuthNotifier {
+  @override
+  Future<AuthState> build() async =>
+      const AuthState(status: AuthStatus.authenticated);
+}
+
+const _descriptor = BuzzPushLeaseDescriptor(
+  origin: 'wss://relay.example',
+  executorKeyId: 'key',
+  executorPubkey: 'pubkey',
+  transport: 'apns',
+  maxLeaseTtlSeconds: 3600,
+  maxContentLength: 4096,
+  maxPlaintextLength: 4096,
+  maxEndpointLength: 2048,
+  maxStringLength: 512,
+);
