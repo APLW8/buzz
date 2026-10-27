@@ -1,6 +1,9 @@
 import Flutter
 import UIKit
 
+// UIKit 9127.0.85 is the iOS 27.1 SDK with Duo APIs. SDK checks must
+// surround runtime availability checks: older SDKs cannot resolve these symbols.
+
 /// Each Flutter route owns a UIKit navigation controller. Its private scroll
 /// view mirrors the Flutter viewport so UIKit performs the large-title layout.
 final class IosNavigationBarFactory: NSObject, FlutterPlatformViewFactory {
@@ -316,6 +319,7 @@ private final class IosNavigationBarView: NSObject, FlutterPlatformView {
       result(nil)
     }
     configure(args as? [String: Any] ?? [:])
+    #if canImport(UIKit, _version: 9127.0.85)
     if #available(iOS 27.1, *), standaloneControl {
       container.addInteraction(UIHingeInteraction { [weak self] _, _ in
         guard let self else { return }
@@ -327,6 +331,7 @@ private final class IosNavigationBarView: NSObject, FlutterPlatformView {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: refresh)
       })
     }
+    #endif
   }
 
   func view() -> UIView { container }
@@ -421,6 +426,7 @@ private final class IosNavigationBarView: NSObject, FlutterPlatformView {
   }
 
   private func reportRailGeometry() {
+    #if canImport(UIKit, _version: 9127.0.85)
     guard #available(iOS 27.1, *), let window = container.window else { return }
     let inset = window.safeAreaInsets
     let right = inset.right > 0 && inset.left == 0
@@ -458,6 +464,7 @@ private final class IosNavigationBarView: NSObject, FlutterPlatformView {
     DispatchQueue.main.async { [weak self] in
       self?.channel.invokeMethod("railGeometry", arguments: values)
     }
+    #endif
   }
 
   private func reportAvatarBounds() {
@@ -872,9 +879,11 @@ private final class IosNavigationBarView: NSObject, FlutterPlatformView {
       stack.bottomAnchor.constraint(equalTo: surface.contentView.bottomAnchor)
     ])
     let item = UIBarButtonItem(customView: surface)
+    #if canImport(UIKit, _version: 9127.0.85)
     if #available(iOS 27.1, *), actions.allSatisfy({ $0["keepInHeaderOnDuo"] as? Bool == true }) {
       item.axisBehavior = .horizontalOnly
     }
+    #endif
     if #available(iOS 26.0, *) { item.hidesSharedBackground = true }
     return item
   }

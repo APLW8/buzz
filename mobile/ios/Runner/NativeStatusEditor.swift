@@ -1,5 +1,8 @@
 import UIKit
 
+// UIKit 9127.0.85 is the iOS 27.1 SDK with Duo APIs. SDK checks must
+// surround runtime availability checks: older SDKs cannot resolve these symbols.
+
 /// Status uses the same navigation-controller sheet as the profile text forms.
 final class NativeStatusEditorViewController: UITableViewController, UITextFieldDelegate {
   let statusField = UITextField()
@@ -48,10 +51,12 @@ final class NativeStatusEditorViewController: UITableViewController, UITextField
     navigationItem.leftBarButtonItem?.accessibilityLabel = "Close"
     navigationItem.rightBarButtonItem = UIBarButtonItem(
       title: "Set", style: .done, target: self, action: #selector(save))
+    #if canImport(UIKit, _version: 9127.0.85)
     if #available(iOS 27.1, *) {
       navigationItem.leftBarButtonItem?.axisBehavior = .verticalPreferred
       navigationItem.rightBarButtonItem?.axisBehavior = .verticalPreferred
     }
+    #endif
     statusField.text = configuration["text"] as? String ?? ""
     statusField.placeholder = "What’s your status?"
     statusField.accessibilityLabel = "Status"

@@ -659,7 +659,6 @@ class RunnerTests: XCTestCase {
 
   @MainActor
   func testStandaloneRailObservesBookPosture() throws {
-    guard #available(iOS 27.1, *) else { return }
     for standalone in [false, true] {
       let parent = UIViewController()
       let bar = IosNavigationBarFactory(
@@ -667,8 +666,16 @@ class RunnerTests: XCTestCase {
       ).create(withFrame: CGRect(x: 0, y: 0, width: 48, height: 48),
                viewIdentifier: 999989,
                arguments: ["standaloneControl": standalone])
-      XCTAssertEqual(
-        bar.view().interactions.contains { $0 is UIHingeInteraction }, standalone)
+      #if canImport(UIKit, _version: 9127.0.85)
+      if #available(iOS 27.1, *) {
+        XCTAssertEqual(
+          bar.view().interactions.contains { $0 is UIHingeInteraction }, standalone)
+      } else {
+        XCTAssertTrue(bar.view().interactions.isEmpty)
+      }
+      #else
+      XCTAssertTrue(bar.view().interactions.isEmpty)
+      #endif
     }
   }
 

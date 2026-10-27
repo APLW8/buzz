@@ -7,7 +7,6 @@ import XCTest
 final class ProfileSetupRecoveryTests: XCTestCase {
   @MainActor
   func testNativeEditorsPreferRightPaneOnlyWithDuoRail() async throws {
-    guard #available(iOS 27.1, *) else { return }
     for duo in [false, true] {
       for method in ["presentStatus", "present"] {
         let messenger = ProfileSetupTestMessenger()
@@ -26,7 +25,12 @@ final class ProfileSetupRecoveryTests: XCTestCase {
           DispatchQueue.main.async { continuation.resume() }
         }
         let sheet = try XCTUnwrap(parent.captured?.sheetPresentationController)
-        XCTAssertEqual(sheet.preferredPlacement, duo ? .trailing : .automatic)
+        #if canImport(UIKit, _version: 9127.0.85)
+        if #available(iOS 27.1, *) {
+          XCTAssertEqual(sheet.preferredPlacement, duo ? .trailing : .automatic)
+        }
+        #endif
+        XCTAssertEqual(sheet.detents.map(\.identifier), [.large])
         XCTAssertNil(sheet.sourceView)
       }
     }
@@ -56,10 +60,12 @@ final class ProfileSetupRecoveryTests: XCTestCase {
     let submit = try XCTUnwrap(editor.navigationItem.rightBarButtonItem)
     XCTAssertEqual(cancel.accessibilityLabel, "Close")
     XCTAssertFalse(submit.isEnabled)
+    #if canImport(UIKit, _version: 9127.0.85)
     if #available(iOS 27.1, *) {
       XCTAssertEqual(cancel.axisBehavior, .verticalPreferred)
       XCTAssertEqual(submit.axisBehavior, .verticalPreferred)
     }
+    #endif
     XCTAssertEqual(editor.tableView(editor.tableView, numberOfRowsInSection: 1), 2)
     editor.tableView(editor.tableView, didSelectRowAt: IndexPath(row: 0, section: 2))
     XCTAssertTrue(submit.isEnabled)
@@ -94,10 +100,12 @@ final class ProfileSetupRecoveryTests: XCTestCase {
       editor.loadViewIfNeeded()
       let cancel = try XCTUnwrap(editor.navigationItem.leftBarButtonItem)
       let submit = try XCTUnwrap(editor.navigationItem.rightBarButtonItem)
+      #if canImport(UIKit, _version: 9127.0.85)
       if #available(iOS 27.1, *) {
         XCTAssertEqual(cancel.axisBehavior, .verticalPreferred)
         XCTAssertEqual(submit.axisBehavior, .verticalPreferred)
       }
+      #endif
       XCTAssertTrue(cancel.isEnabled)
       XCTAssertFalse(submit.isEnabled)
       UIApplication.shared.sendAction(try XCTUnwrap(cancel.action), to: cancel.target, from: cancel, for: nil)
