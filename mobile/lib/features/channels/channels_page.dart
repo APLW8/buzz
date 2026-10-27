@@ -1,4 +1,6 @@
 import 'package:buzz/shared/widgets/adaptive_conversation_pane.dart';
+import '../agents/agents_sheet.dart';
+import '../../shared/agents/remote_agents.dart';
 import 'channel_unread.dart';
 import '../../shared/widgets/collapsible_section_body.dart';
 import '../../shared/widgets/compose_morph_icon.dart';
@@ -473,6 +475,9 @@ class ChannelsPage extends HookConsumerWidget {
     final communityName = activeCommunity?.name.trim() ?? '';
     final topSectionGradient = context.appColors.topSectionGradient;
     final usesPinnedGradient = topSectionGradient != null;
+    final onAgents = supportsRemoteAgents(activeCommunity)
+        ? () => showAgents(context)
+        : null;
 
     return FrostedScaffold(
       backgroundColor: usesPinnedGradient
@@ -506,6 +511,14 @@ class ChannelsPage extends HookConsumerWidget {
           onPressed: openCommunitySwitcher,
         ),
         nativeActions: [
+          if (onAgents != null)
+            IosNavigationAction(
+              label: 'Agents',
+              symbol: 'person.2',
+              sharesBackground: true,
+              icon: BuzzIcons.bot,
+              onPressed: onAgents,
+            ),
           if (onSearch != null)
             IosNavigationAction(
               label: 'Search',
@@ -564,6 +577,7 @@ class ChannelsPage extends HookConsumerWidget {
         actions: [
           _ChannelHeaderActions(
             onSearch: onSearch,
+            onAgents: onAgents,
             onInbox: onInbox,
             hasUnreadInbox: hasUnreadInbox,
             onSettings: () {
