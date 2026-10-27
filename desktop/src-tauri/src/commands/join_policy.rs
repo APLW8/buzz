@@ -7,8 +7,7 @@ use url::Url;
 // MiB covers two maximally escaped documents plus the response envelope.
 const MAX_JOIN_POLICY_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 const JOIN_POLICY_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
-const NOT_A_COMMUNITY_ERROR: &str =
-    "That URL didn't respond like a Buzz community. Check the link and try again.";
+const NOT_A_COMMUNITY_ERROR: &str = "That URL didn't respond like a Buzz community. Enter a community URL like https://community.example.com or an invite link like https://community.example.com/invite/abc123.";
 
 fn join_policy_url(relay_url: &str) -> Result<Url, String> {
     let mut url = Url::parse(relay_url.trim()).map_err(|_| "invalid relay URL".to_string())?;

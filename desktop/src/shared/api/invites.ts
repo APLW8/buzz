@@ -22,7 +22,7 @@ const NIP98_KIND = 27235;
 const INVITE_REQUEST_TIMEOUT_MS = 15_000;
 
 export const NOT_A_COMMUNITY_ERROR =
-  "That URL didn't respond like a Buzz community. Check the link and try again.";
+  "That URL didn't respond like a Buzz community. Enter a community URL like https://community.example.com or an invite link like https://community.example.com/invite/abc123.";
 
 // A web page at the community URL (an HTML 200) makes WebKit's `json()` throw
 // the opaque "The string did not match the expected pattern."
