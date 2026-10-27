@@ -25,15 +25,15 @@ final pushSubscriptionSyncProvider = Provider<void>((ref) {
     return;
   }
 
-  // Legacy Solo chats arrive with the encrypted Solo record. Until it loads,
-  // labelled Solo chats, DMs and mentions still push; the lease updates when
-  // the record arrives.
-  final legacySoloChannelIds =
-      ref.watch(meGroupsProvider).value?.channels ?? const <String>[];
+  // Legacy Solo chats are listed only in the Solo record. Wait for it (cached
+  // or fetched) so an unresolved record never drops them from the lease.
+  final soloRecord = ref.watch(meGroupsProvider).value;
+  if (soloRecord == null) return;
+
   final subscriptions = desiredBuzzPushSubscriptions(
     community: active,
     channels: channels,
-    legacySoloChannelIds: legacySoloChannelIds,
+    legacySoloChannelIds: soloRecord.channels,
     mutedChannelIds: [
       for (final entry in mutes.store.channels.entries)
         if (entry.value.muted) entry.key,

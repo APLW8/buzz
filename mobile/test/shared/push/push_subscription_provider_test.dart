@@ -1,8 +1,16 @@
+import 'dart:async';
+
 import 'package:buzz/features/channels/channel.dart';
+import 'package:buzz/features/channels/channel_mutes/channel_mutes_provider.dart';
+import 'package:buzz/features/channels/channels_provider.dart';
 import 'package:buzz/shared/community/community.dart';
+import 'package:buzz/shared/community/community_provider.dart';
+import 'package:buzz/shared/me/me_groups.dart';
+import 'package:buzz/shared/me/me_sync.dart';
 import 'package:buzz/shared/push/push_subscription.dart';
 import 'package:buzz/shared/push/push_subscription_provider.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:nostr/nostr.dart' as nostr;
 
 void main() {
@@ -80,6 +88,48 @@ void main() {
     expect(subscriptions.last.filter.hTags, [dmID, soloID, legacySoloID]);
   });
 
+  test('waits for the Solo record before updating the desired lease', () async {
+    const legacySoloID = '123e4567-e89b-42d3-a456-426614174009';
+    final community = Community.create(
+      name: 'Team',
+      relayUrl: 'https://relay.example.com',
+      nsec: nostr.Keys.generate().nsec,
+    ).copyWith(pushNotificationsEnabled: true);
+    final communities = _RecordingCommunityList();
+    final soloRecord = StreamController<MeGroups>();
+    addTearDown(soloRecord.close);
+    final container = ProviderContainer(
+      overrides: [
+        activeCommunityProvider.overrideWith((ref) async => community),
+        communityListProvider.overrideWith(() => communities),
+        channelsProvider.overrideWith(
+          () => _FixedChannels([
+            channel(activeID),
+            channel(legacySoloID, channelType: 'stream', visibility: 'private'),
+          ]),
+        ),
+        channelMutesProvider.overrideWith(_ReadyMutes.new),
+        meGroupsProvider.overrideWith((ref) => soloRecord.stream),
+      ],
+    );
+    addTearDown(container.dispose);
+    container.listen(pushSubscriptionSyncProvider, (_, _) {});
+    await container.read(activeCommunityProvider.future);
+    await container.read(channelsProvider.future);
+    await pumpEventQueue();
+
+    expect(communities.desired, isEmpty);
+
+    soloRecord.add(const MeGroups(channels: [legacySoloID]));
+    await pumpEventQueue();
+
+    expect(communities.desired, hasLength(1));
+    expect(communities.desired.single.last.filter.hTags, [
+      activeID,
+      legacySoloID,
+    ]);
+  });
+
   test('returns no desired subscriptions without a signing identity', () {
     final subscriptions = desiredBuzzPushSubscriptions(
       community: Community.create(
@@ -115,3 +165,30 @@ Channel channel(
   isMember: isMember,
   archivedAt: archived ? DateTime(2026) : null,
 );
+
+class _RecordingCommunityList extends CommunityListNotifier {
+  final desired = <List<BuzzPushSubscription>>[];
+
+  @override
+  Future<List<Community>> build() async => const [];
+
+  @override
+  Future<void> updateDesiredPushSubscriptions(
+    String id,
+    List<BuzzPushSubscription> desired,
+  ) async => this.desired.add(desired);
+}
+
+class _FixedChannels extends ChannelsNotifier {
+  _FixedChannels(this._channels);
+
+  final List<Channel> _channels;
+
+  @override
+  Future<List<Channel>> build() async => _channels;
+}
+
+class _ReadyMutes extends ChannelMutesNotifier {
+  @override
+  ChannelMutesState build() => const ChannelMutesState(isReady: true);
+}
