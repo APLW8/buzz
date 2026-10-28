@@ -148,6 +148,97 @@ void main() {
         expect(tester.getSize(visibleAvatar), const Size.square(220));
         await tester.pump(const Duration(milliseconds: 100));
         expect(tester.getTopLeft(visibleAvatar).dy, closeTo(66, 0.01));
+        // Every tab keeps one diameter and moves from the currently painted
+        // circle position. Controls always enter upward, including Animated.
+        var previousTop = tester.getTopLeft(visibleAvatar).dy;
+        for (final label in [
+          'Animated',
+          'Emoji',
+          'Image',
+          'Animated',
+          'Image',
+          'Emoji',
+        ]) {
+          await tester.tap(find.text(label));
+          await tester.pump();
+          final circleFinder = label == 'Animated'
+              ? find.byKey(const ValueKey('animated-avatar-capture-preview'))
+              : visibleAvatar;
+          expect(tester.getSize(circleFinder), const Size.square(220));
+          expect(
+            tester.getTopLeft(circleFinder).dy,
+            closeTo(previousTop, 0.01),
+          );
+          final controlsKey = label == 'Animated'
+              ? 'animated-avatar-controls-transition'
+              : label == 'Emoji'
+              ? 'avatar-mode-tray-transition-transform'
+              : 'avatar-mode-transition-transform';
+          final controls = find.byKey(ValueKey(controlsKey));
+          final controlsContent = find
+              .descendant(of: controls, matching: find.byType(Opacity))
+              .first;
+          final startControlsTop = tester.getTopLeft(controlsContent).dy;
+          final startOffset = tester
+              .widget<Transform>(controls)
+              .transform
+              .getTranslation();
+          expect(startOffset.x, 0);
+          expect(startOffset.y, greaterThan(0));
+          await tester.pump(const Duration(milliseconds: 50));
+          final midwayTop = tester.getTopLeft(circleFinder).dy;
+          final midwayControlsTop = tester.getTopLeft(controlsContent).dy;
+          expect(midwayControlsTop, lessThan(startControlsTop));
+          expect(tester.getSize(circleFinder), const Size.square(220));
+          final midwayOffset = tester
+              .widget<Transform>(controls)
+              .transform
+              .getTranslation();
+          expect(
+            midwayOffset.y,
+            allOf(greaterThan(0), lessThan(startOffset.y)),
+          );
+          await tester.pump(const Duration(milliseconds: 150));
+          final destinationTop = tester.getTopLeft(circleFinder).dy;
+          expect(
+            tester.getTopLeft(controlsContent).dy,
+            lessThan(midwayControlsTop),
+          );
+          expect(
+            midwayTop,
+            allOf(
+              greaterThan(
+                previousTop < destinationTop ? previousTop : destinationTop,
+              ),
+              lessThan(
+                previousTop > destinationTop ? previousTop : destinationTop,
+              ),
+            ),
+          );
+          expect(tester.getSize(circleFinder), const Size.square(220));
+          expect(
+            tester.widget<Transform>(controls).transform.getTranslation().y,
+            0,
+          );
+          previousTop = destinationTop;
+        }
+        // Changing direction mid-flight starts from the painted position.
+        await tester.tap(find.text('Animated'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 50));
+        final interruptedTop = tester
+            .getTopLeft(
+              find.byKey(const ValueKey('animated-avatar-capture-preview')),
+            )
+            .dy;
+        await tester.tap(find.text('Emoji'));
+        await tester.pump();
+        expect(
+          tester.getTopLeft(visibleAvatar).dy,
+          closeTo(interruptedTop, 0.01),
+        );
+        expect(tester.getSize(visibleAvatar), const Size.square(220));
+        await tester.pump(const Duration(milliseconds: 200));
         // Empty native previews start 15% smaller, then reach editor size.
         await tester.binding.defaultBinaryMessenger.handlePlatformMessage(
           'buzz/profile_avatar_sheet',

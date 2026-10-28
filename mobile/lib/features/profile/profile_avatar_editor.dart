@@ -176,10 +176,12 @@ class ProfileAvatarEditor extends HookConsumerWidget {
     final modeTransitionFrom = useRef(mode);
     final retainedPreview = useRef<Widget?>(null);
     final retainedPreviewTop = useRef(0.0);
+    final currentPreviewTop = useRef<double?>(null);
+    final modeStartPreviewTop = useRef<double?>(null);
     final modeTransitionController = useAnimationController(
       duration: anchoredPreview == null
           ? _motionDuration
-          : const Duration(milliseconds: 100),
+          : const Duration(milliseconds: 200),
       initialValue: 1,
     );
     final modeTransitionValue = useAnimation(modeTransitionController);
@@ -189,6 +191,7 @@ class ProfileAvatarEditor extends HookConsumerWidget {
 
     void selectMode(ProfileAvatarMode nextMode) {
       if (nextMode == mode) return;
+      modeStartPreviewTop.value = currentPreviewTop.value;
       modeTransitionFrom.value = mode;
       modeTransitionDirection.value = nextMode.index > mode.index ? 1 : -1;
       unawaited(HapticFeedback.selectionClick());
@@ -406,13 +409,20 @@ class ProfileAvatarEditor extends HookConsumerWidget {
                 modeTop -
                 (anchoredPreview?.height ?? _previewBlockSize)) /
             2;
-        final displayedPreviewTop =
+        final targetPreviewTop =
             anchoredPreview != null && mode == ProfileAvatarMode.emoji
             ? centeredEmojiTop
             : returningToEmoji
             ? animatedPreviewTop +
                   (previewTop - animatedPreviewTop) * modeTransitionProgress
             : previewTop;
+        final displayedPreviewTop = anchoredPreview != null
+            ? (modeStartPreviewTop.value ?? targetPreviewTop) +
+                  (targetPreviewTop -
+                          (modeStartPreviewTop.value ?? targetPreviewTop)) *
+                      modeTransitionProgress
+            : targetPreviewTop;
+        currentPreviewTop.value = displayedPreviewTop;
         if (mode != ProfileAvatarMode.animated) {
           retainedPreviewTop.value = displayedPreviewTop;
         }
@@ -458,6 +468,7 @@ class ProfileAvatarEditor extends HookConsumerWidget {
             selectedColor: selectedColor.value,
             transitionProgress: modeTransitionProgress,
             transitionDirection: modeTransitionDirection.value,
+            controlsFromBelow: anchoredPreview != null,
             onSectionChanged: (section) => emojiSection.value = section,
             onEmojiSelected: (emoji) {
               selectedEmoji.value = emoji;
@@ -478,6 +489,12 @@ class ProfileAvatarEditor extends HookConsumerWidget {
                 AnimatedAvatarCapture(
                   previewKey: previewKey,
                   previewSize: anchoredPreview?.width,
+                  previewOffset: anchoredPreview == null
+                      ? 0
+                      : displayedPreviewTop - modeTop,
+                  controlsTransitionProgress: anchoredPreview == null
+                      ? 1
+                      : modeTransitionProgress,
                   height: contentHeight,
                   onPrepareChanged: onAnimatedPrepareChanged,
                   disposalBarrier: cameraDisposal.value,
@@ -496,10 +513,14 @@ class ProfileAvatarEditor extends HookConsumerWidget {
                 child: Transform.translate(
                   key: const ValueKey('avatar-mode-transition-transform'),
                   offset: Offset(
-                    modeTransitionDirection.value *
-                        _modeTransitionDistance *
-                        (1 - modeTransitionProgress),
-                    0,
+                    anchoredPreview == null
+                        ? modeTransitionDirection.value *
+                              _modeTransitionDistance *
+                              (1 - modeTransitionProgress)
+                        : 0,
+                    anchoredPreview == null
+                        ? 0
+                        : 16 * (1 - modeTransitionProgress),
                   ),
                   child: Opacity(
                     key: const ValueKey('avatar-mode-transition-opacity'),
@@ -567,7 +588,8 @@ class ProfileAvatarEditor extends HookConsumerWidget {
                 right: Grid.gutter,
                 top: displayedPreviewTop,
                 height: anchoredPreview?.height ?? _previewBlockSize,
-                duration: anchorMoved || returningToEmoji
+                duration:
+                    anchoredPreview != null || anchorMoved || returningToEmoji
                     ? Duration.zero
                     : reduceMotion
                     ? Duration.zero
@@ -613,7 +635,10 @@ class ProfileAvatarEditor extends HookConsumerWidget {
             AnimatedPositioned(
               // Camera controls already morph into the source buttons before
               // closing. Keep their bottom rail fixed during the handoff.
-              duration: mode == ProfileAvatarMode.image || reduceMotion
+              duration:
+                  anchoredPreview != null ||
+                      mode == ProfileAvatarMode.image ||
+                      reduceMotion
                   ? Duration.zero
                   : const Duration(milliseconds: 150),
               curve: Curves.easeOutCubic,
@@ -623,7 +648,9 @@ class ProfileAvatarEditor extends HookConsumerWidget {
               height: modeHeight,
               child: FadeTransition(
                 opacity: curvedEntrance,
-                child: anchoredPreview == null
+                child:
+                    anchoredPreview == null ||
+                        mode == ProfileAvatarMode.animated
                     ? transitionedModeContent
                     : ClipRect(
                         child: SingleChildScrollView(
@@ -643,12 +670,15 @@ class ProfileAvatarEditor extends HookConsumerWidget {
                 key: const ValueKey('avatar-mode-retained-preview'),
                 left: Grid.gutter,
                 right: Grid.gutter,
-                top:
-                    retainedPreviewTop.value +
-                    ((anchoredPreview == null ? basePreviewTop : previewTop) -
-                            retainedPreviewTop.value) *
-                        modeTransitionProgress,
-                height: _previewBlockSize,
+                top: anchoredPreview != null
+                    ? displayedPreviewTop
+                    : retainedPreviewTop.value +
+                          ((anchoredPreview == null
+                                      ? basePreviewTop
+                                      : previewTop) -
+                                  retainedPreviewTop.value) *
+                              modeTransitionProgress,
+                height: anchoredPreview?.height ?? _previewBlockSize,
                 child: IgnorePointer(
                   child: Opacity(
                     opacity: 1 - modeTransitionProgress,
