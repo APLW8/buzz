@@ -2344,6 +2344,57 @@ void main() {
     expect(container.read(channelsProvider).value, isEmpty);
     expect(notifier.channelById(_channelA), isNull);
     expect(container.read(channelByIdProvider(_channelA)), isNull);
+
+    // The open's background refresh can list the DM before the open
+    // remembers it. The list still owns it.
+    session.memberships = [_membership(_channelA, myPk)];
+    await notifier.refresh();
+    notifier.rememberOpened(dm);
+    session.memberships = [];
+    await notifier.refresh();
+    expect(notifier.channelById(_channelA), isNull);
+  });
+
+  test('a DM opened ahead of the list stays in its community', () async {
+    final session = _FakeRelaySession(
+      memberships: [_membership(_channelA, myPk)],
+      metadata: [_meta(id: _channelA, name: 'Alice', channelType: 'dm')],
+    );
+    final container = _buildContainer(session: session);
+    addTearDown(container.dispose);
+    final notifier = container.read(channelsProvider.notifier);
+    final dm = (await container.read(channelsProvider.future)).single;
+    session.memberships = [];
+    await notifier.refresh();
+    notifier.rememberOpened(dm);
+    final found = <String?>[];
+    final lookup = container.listen(
+      channelByIdProvider(_channelA),
+      (_, next) => found.add(next?.id),
+      fireImmediately: true,
+    );
+    addTearDown(lookup.close);
+    expect(found, [_channelA]);
+
+    // Neither community lists the DM, yet the open lookup lets it go.
+    container
+        .read(relayConfigProvider.notifier)
+        .update(baseUrl: 'https://community-b.example');
+    await container.read(channelsProvider.future);
+    await _settle();
+    expect(lookup.read(), isNull);
+    expect(
+      container.read(channelsProvider.notifier).channelById(_channelA),
+      isNull,
+    );
+
+    // Likewise across an identity switch.
+    notifier.rememberOpened(dm);
+    expect(lookup.read()?.id, _channelA);
+    container.read(_testPubkeyProvider.notifier).set('other');
+    await container.read(channelsProvider.future);
+    await _settle();
+    expect(lookup.read(), isNull);
   });
 
   test(
