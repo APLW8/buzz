@@ -15,5 +15,3 @@ CREATE UNIQUE INDEX user_deletion_fences_global_key
     ON user_deletion_fences (pubkey) WHERE scope_community_id IS NULL;
 CREATE UNIQUE INDEX user_deletion_fences_scoped_key
     ON user_deletion_fences (pubkey, scope_community_id) WHERE scope_community_id IS NOT NULL;
-CREATE INDEX user_deletion_fences_request
-    ON user_deletion_fences (request_id);

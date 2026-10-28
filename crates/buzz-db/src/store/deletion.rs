@@ -4421,6 +4421,20 @@ mod postgres_tests {
             .submit("demo:fence-retention", "operator", None)
             .await
             .unwrap();
+        let entities = db.entity_deletion_store();
+        entities
+            .approve(
+                entity.id,
+                "approver",
+                entity.inventory_digest.as_deref().unwrap(),
+            )
+            .await
+            .unwrap();
+        let entity_lease = entities
+            .claim(entity.id, "fence-worker", Duration::from_secs(300))
+            .await
+            .unwrap()
+            .unwrap();
         let human_key = nostr::Keys::generate().public_key();
         let agent_key = nostr::Keys::generate().public_key();
         let human = FenceIdentity::user(human_key);
@@ -4432,13 +4446,14 @@ mod postgres_tests {
             .await
             .unwrap();
         let mut tx = db.pool.begin().await.unwrap();
+        fences::lock_request(&mut tx, &entity_lease).await.unwrap();
         fences::lock_exclusive(&mut tx, &[human, agent])
             .await
             .unwrap();
-        let global = fences::insert(&mut tx, human, entity.id, None)
+        let global = fences::insert(&mut tx, human, &entity_lease, None)
             .await
             .unwrap();
-        let scoped = fences::insert(&mut tx, agent, entity.id, Some(human_key))
+        let scoped = fences::insert(&mut tx, agent, &entity_lease, Some(human_key))
             .await
             .unwrap();
         tx.commit().await.unwrap();

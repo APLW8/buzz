@@ -2,7 +2,8 @@
 //! path calls these helpers yet. Installing fences does not itself enforce them.
 //!
 //! Callers use a writer-pool READ COMMITTED transaction. Acquire existing
-//! community/worker guards first, then all human locks, then scoped agent locks.
+//! community guards first, then `lock_request` for the worker, then all human
+//! locks, then scoped agent locks.
 //! Within each group acquire the whole set in one call (sorted here), never
 //! upgrade shared locks to exclusive. Gate workers may discover agents after
 //! locking humans, then lock the complete agent set. Keep the transaction open
@@ -15,6 +16,7 @@ use sha2::{Digest, Sha256};
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
+use super::entity_deletion::{lock_owned, validate_approved_inventory, EntityLease};
 use crate::{DbError, Result};
 
 /// A stable lock/restriction identity, independent of mutable profile rows.
@@ -148,6 +150,10 @@ async fn lock(
 /// For multiple identities, acquire the full shared set first. The caller must
 /// refuse a restricted operation and retain this transaction through any write.
 /// An agent lookup is scoped; it does not resolve or check the human owner.
+/// The planned agent-write path locks the verified owner and agent together,
+/// then reads the agent restriction only. This requires the gate to install the
+/// human and all owned-agent restrictions atomically, and creation/assignment
+/// paths to reject restricted owners. These callers are not wired in yet.
 pub async fn find(
     tx: &mut Transaction<'_, Postgres>,
     identity: FenceIdentity,
@@ -177,17 +183,32 @@ async fn read(
     Ok(query.fetch_optional(&mut **tx).await?)
 }
 
-/// Insert an idempotent restriction under its exclusive identity lock.
+/// Lock the parent request and validate the worker's lease and approved inventory.
 ///
-/// The caller must validate approval/worker ownership and verified agent
-/// ownership, acquire the complete exclusive identity set in order, and save
-/// its checkpoint in this same transaction. This helper does not authorize a
-/// deletion. A retry preserves the first row; conflicting provenance errors.
-/// On any error roll back the transaction, including other fences/checkpoints.
+/// Call before acquiring any identity locks in a fencing transaction. Each
+/// insertion rechecks this guard; holding the row lock prevents another worker
+/// from claiming the request until this transaction ends. The caller must still
+/// verify that the identities and agent ownership belong to this request.
+pub async fn lock_request(tx: &mut Transaction<'_, Postgres>, lease: &EntityLease) -> Result<()> {
+    let request = lock_owned(tx, lease).await?;
+    if request.entity_type != "user" {
+        return Err(DbError::DeletionSafety(
+            "fences require a user deletion request".into(),
+        ));
+    }
+    validate_approved_inventory(tx, &request).await
+}
+
+/// Insert an idempotent restriction under a valid worker lease and identity lock.
+///
+/// For multiple identities, first call `lock_request`, then acquire the complete exclusive
+/// identity set in order, verify agent ownership, and save its checkpoint in this
+/// same transaction. A retry preserves the first row; conflicting provenance
+/// errors. On any error roll back, including other fences/checkpoints.
 pub async fn insert(
     tx: &mut Transaction<'_, Postgres>,
     identity: FenceIdentity,
-    request_id: Uuid,
+    lease: &EntityLease,
     source_owner: Option<PublicKey>,
 ) -> Result<UserDeletionFence> {
     if identity.scope.is_some() != source_owner.is_some() {
@@ -195,12 +216,8 @@ pub async fn insert(
             "agent fences require an owner; user fences do not".into(),
         ));
     }
-    let exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM entity_deletion_requests WHERE id = $1 AND entity_type = 'user')",
-    ).bind(request_id).fetch_one(&mut **tx).await?;
-    if !exists {
-        return Err(DbError::NotFound("user deletion request".into()));
-    }
+    lock_request(tx, lease).await?;
+    let request_id = lease.request_id;
     lock_exclusive(tx, &[identity]).await?;
     let owner = source_owner.map(|key| key.to_hex());
     sqlx::query(
