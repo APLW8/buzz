@@ -12,13 +12,14 @@ use crate::handlers::ingest::{ingest_event, HttpAuthMethod, IngestAuth};
 use crate::state::AppState;
 use buzz_auth::Scope;
 
+/// Test state on the shared test database. The pool keeps sqlx's default
+/// acquire timeout: `test_state_with_database_url` waits only 100 ms so
+/// closed-port tests fail fast, and a first connect to a busy CI database can
+/// take longer than that (`PoolTimedOut`).
 pub(crate) async fn state() -> Arc<AppState> {
-    // This fixture creates several real channels per test. Keep pool waiting
-    // bounded while allowing the isolated PostgreSQL lane's local service a
-    // little scheduling headroom.
-    crate::state::tests::test_state_with_database_url_and_acquire_timeout(
+    crate::state::tests::test_state_with_database_url_and_pool_options(
         &crate::test_support::database_url(),
-        std::time::Duration::from_secs(3),
+        sqlx::postgres::PgPoolOptions::new(),
     )
     .await
 }
