@@ -2320,6 +2320,32 @@ void main() {
     );
   });
 
+  test('a DM opened ahead of the list is not found after it is left', () async {
+    final session = _FakeRelaySession(
+      memberships: [_membership(_channelA, myPk)],
+      metadata: [_meta(id: _channelA, name: 'Alice', channelType: 'dm')],
+    );
+    final container = _buildContainer(session: session);
+    addTearDown(container.dispose);
+    final notifier = container.read(channelsProvider.notifier);
+    final dm = (await container.read(channelsProvider.future)).single;
+
+    // A fast open finds the DM from its own metadata before the list has it.
+    session.memberships = [];
+    await notifier.refresh();
+    notifier.rememberOpened(dm);
+    expect(notifier.channelById(_channelA)?.id, _channelA);
+
+    // Once listed, the list owns it, so leaving drops it everywhere.
+    session.memberships = [_membership(_channelA, myPk)];
+    await notifier.refresh();
+    session.memberships = [];
+    await notifier.refresh();
+    expect(container.read(channelsProvider).value, isEmpty);
+    expect(notifier.channelById(_channelA), isNull);
+    expect(container.read(channelByIdProvider(_channelA)), isNull);
+  });
+
   test(
     'archived kind:39000 metadata sets Channel.isArchived (covers TTL auto-archive)',
     () async {

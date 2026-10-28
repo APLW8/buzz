@@ -79,8 +79,8 @@ class ChannelsNotifier extends AsyncNotifier<List<Channel>> {
   Set<String> _hiddenDmIds = const {};
 
   /// Channels opened from their own metadata before this list had them, as a
-  /// fast DM open does. The list takes precedence once it has them; a DM's
-  /// participants are fixed, so the opened copy stays valid until then.
+  /// fast DM open does. Each is dropped once the list has it, so a DM later
+  /// hidden or left is not found through its opened copy.
   Map<String, Channel> _openedAhead = const {};
 
   /// Fences directory responses to the relay and identity that requested them.
@@ -104,7 +104,7 @@ class ChannelsNotifier extends AsyncNotifier<List<Channel>> {
   Set<String> get hiddenDmIds => Set.unmodifiable(_hiddenDmIds);
 
   /// Keeps [channel], opened before this list has it, findable by
-  /// [channelById] while the list reloads.
+  /// [channelById] and [channelByIdProvider] until the list has it.
   void rememberOpened(Channel channel) =>
       _openedAhead = {..._openedAhead, channel.id: channel};
 
@@ -185,6 +185,15 @@ class ChannelsNotifier extends AsyncNotifier<List<Channel>> {
         (_hasLoaded ? state.value : null) ??
         _restoreSnapshot(pubkey, relayBaseUrl);
     if (snapshot != null) _hasCachedSnapshot = true;
+    listenSelf((_, next) {
+      final listed = next.value;
+      if (listed == null || _openedAhead.isEmpty) return;
+      final ids = {for (final channel in listed) channel.id};
+      _openedAhead = {
+        for (final entry in _openedAhead.entries)
+          if (!ids.contains(entry.key)) entry.key: entry.value,
+      };
+    });
     _saveSnapshot = pubkey == null
         ? null
         : _captureSnapshotWriter(pubkey, relayBaseUrl);
@@ -1114,4 +1123,18 @@ class ChannelsNotifier extends AsyncNotifier<List<Channel>> {
 
 final channelsProvider = AsyncNotifierProvider<ChannelsNotifier, List<Channel>>(
   ChannelsNotifier.new,
+);
+
+/// The channel with this id from the list, else as it was opened ahead of the
+/// list (see [ChannelsNotifier.rememberOpened]).
+final channelByIdProvider = Provider.autoDispose.family<Channel?, String>(
+  (ref, channelId) =>
+      ref.watch(
+        channelsProvider.select(
+          (channels) => channels.value
+              ?.where((channel) => channel.id == channelId)
+              .firstOrNull,
+        ),
+      ) ??
+      ref.read(channelsProvider.notifier).channelById(channelId),
 );
