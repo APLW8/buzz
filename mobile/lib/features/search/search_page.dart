@@ -602,12 +602,15 @@ class _PeopleSection extends ConsumerWidget {
             onResultSelected();
             final channel = await ref
                 .read(channelActionsProvider)
-                .openDm(pubkeys: [user.pubkey]);
+                .openDm(pubkeys: [user.pubkey], waitForChannelList: false);
             if (!context.mounted) return;
             await openConversationPane(
               context,
               channel.id,
-              (_) => ChannelDetailPage(channel: channel),
+              (_) => ChannelDetailPage(
+                channel: channel,
+                placement: ChannelRoutePlacement.ordinary,
+              ),
             );
           },
         );
