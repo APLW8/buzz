@@ -155,9 +155,14 @@ class ProfileAvatarEditor extends HookConsumerWidget {
     final previousAnchor = useRef(anchoredPreview);
     final anchorMoved = previousAnchor.value != anchoredPreview;
     previousAnchor.value = anchoredPreview;
+    // Seed Emoji controls from the opening draft without making it the Image baseline.
     final currentEmojiAvatar = useMemoized(
-      () => parseEmojiAvatarDataUrl(currentAvatarUrl),
-      [currentAvatarUrl],
+      () => parseEmojiAvatarDataUrl(
+        draft is ProfileUrlAvatarDraft
+            ? (draft as ProfileUrlAvatarDraft).url
+            : currentAvatarUrl,
+      ),
+      const [],
     );
     final selectedEmoji = useState(currentEmojiAvatar?.emoji ?? '😊');
     final initialColor = useMemoized(

@@ -40,7 +40,6 @@ final class NativeProfileSetupCoordinator: NSObject, UIAdaptivePresentationContr
               let controller = self.navigation?.viewControllers.first as? NativeProfileSetupController else { result(nil); return }
         self.navigation?.overrideUserInterfaceStyle = args["dark"] as? Bool == true ? .dark : .light
         controller.updateAppearance(args)
-        self.avatarController?.view.backgroundColor = controller.view.backgroundColor
         self.updateEditorAppearance(controller)
         result(nil); return
       }

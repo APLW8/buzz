@@ -1,4 +1,5 @@
 import 'package:buzz/features/profile/profile_setup_avatar_editor.dart';
+import 'package:buzz/features/profile/profile_setup_empty_avatar.dart';
 import 'package:buzz/features/profile/profile_avatar_draft.dart';
 import 'package:buzz/shared/emoji/emoji_avatar.dart';
 import 'package:buzz/features/profile/profile_avatar_editor.dart';
@@ -50,10 +51,29 @@ void main() {
       expect(openingEditor.mode, ProfileAvatarMode.emoji);
       final openingDraft = openingEditor.draft! as ProfileUrlAvatarDraft;
       expect(parseEmojiAvatarDataUrl(openingDraft.url)?.emoji, '😊');
-      expect(openingEditor.currentAvatarUrl, openingDraft.url);
+      expect(openingEditor.currentAvatarUrl, isNull);
+      await tester.tap(find.text('Image'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(find.byType(ProfileSetupEmptyAvatar), findsOneWidget);
+      expect(
+        tester
+            .widget<TextButton>(find.widgetWithText(TextButton, 'Done'))
+            .onPressed,
+        isNull,
+      );
+      await tester.tap(find.text('Emoji'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+      final restoredDraft =
+          tester
+                  .widget<ProfileAvatarEditor>(find.byType(ProfileAvatarEditor))
+                  .draft!
+              as ProfileUrlAvatarDraft;
+      expect(restoredDraft.url, openingDraft.url);
       await tester.tap(find.text('Done'));
       await tester.pump();
-      expect(accepted, same(openingDraft));
+      expect(accepted, same(restoredDraft));
       await open(null);
       await tester.tap(find.byTooltip('Back to profile'));
       await tester.pump();
@@ -131,6 +151,15 @@ void main() {
       );
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 200));
+      if (mode == ProfileAvatarMode.image) {
+        expect(find.byType(ProfileSetupEmptyAvatar), findsOneWidget);
+        expect(
+          tester
+              .widget<ProfileAvatarEditor>(find.byType(ProfileAvatarEditor))
+              .draft,
+          isNull,
+        );
+      }
       await send('back');
       await tester.pump();
       double emptyOpacity() => tester
@@ -395,6 +424,13 @@ void main() {
         await tester.tap(find.text('Image'));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 200));
+        expect(find.byType(ProfileSetupEmptyAvatar), findsNothing);
+        expect(
+          tester
+              .widget<ProfileAvatarEditor>(find.byType(ProfileAvatarEditor))
+              .draft,
+          isNull,
+        );
         expect(
           tester
               .getTopLeft(find.byKey(const ValueKey('avatar-preview-position')))
