@@ -98,12 +98,17 @@ jobs:
       - name: Build sidecars
         shell: bash
         run: |
-          cargo build --release --target "$TARGET" -p buzz-acp -p buzz-agent -p buzz-dev-mcp -p git-credential-nostr -p buzz-cli
+          cargo build --locked --release --target "$TARGET" -p buzz-acp -p buzz-agent -p buzz-dev-mcp -p git-credential-nostr -p buzz-cli
           ./scripts/bundle-sidecars.sh "$TARGET"
 
-      - name: Rust guard tests
+      # Full buzz-desktop suite, no test filter: the new guard tests run here
+      # alongside every existing test, so a regression in another agent or in
+      # the shared spawn path fails the build.
+      - name: Desktop Rust test suite (full)
         shell: bash
-        run: cd desktop/src-tauri && cargo test -p buzz-desktop --lib remote_only_launch_tests -- --nocapture
+        run: cargo test --locked --manifest-path desktop/src-tauri/Cargo.toml --target "$TARGET"
+        env:
+          CMAKE_POLICY_VERSION_MINIMUM: "3.5"
 
       - name: Generate non-updating bundle config
         shell: bash
@@ -118,7 +123,7 @@ jobs:
 
       - name: Build Windows NSIS installer (unsigned)
         shell: bash
-        run: cd desktop && pnpm tauri build --target "$TARGET" --bundles nsis --config src-tauri/tauri.unsigned.conf.json
+        run: cd desktop && pnpm tauri build --target "$TARGET" --bundles nsis --config src-tauri/tauri.unsigned.conf.json -- --locked
         env:
           CMAKE_POLICY_VERSION_MINIMUM: "3.5"
 
