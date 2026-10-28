@@ -152,7 +152,9 @@ final class NativeProfileSetupCoordinator: NSObject, UIAdaptivePresentationContr
       let draft = call.arguments as? [String: Any]
       func returnToProfile() {
         controller.navigationItem.setRightBarButton(nil, animated: false)
-        controller.setEditorVisible(false)
+        // Keep the profile heading hidden until the editor has left. Restoring
+        // it here exposes it behind the exiting segmented control and starts
+        // its return animation twice; restoreProfilePage owns that transition.
         let frame = controller.editorFrame
         let rect = controller.avatarFrame(in: controller.view).offsetBy(dx: -frame.minX, dy: -frame.minY)
         // Keep the moving avatar opaque until Flutter has drawn its final
