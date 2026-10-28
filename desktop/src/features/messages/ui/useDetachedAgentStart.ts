@@ -9,6 +9,15 @@ import { normalizePubkey } from "@/shared/lib/pubkey";
 import { getErrorMessage } from "./useMentionSendFlow.helpers";
 
 /**
+ * Agents whose harness runs on the remote backend only. Their local wake is
+ * skipped: the message is already published, and a local spawn would duplicate
+ * the remote body. Pinned by pubkey so the record, keys, and chats stay local.
+ */
+const REMOTE_ONLY_AGENT_PUBKEYS: readonly string[] = [
+  "d2ce9939002896a70e05bcc4d2727589a6bc3abb3b944af0844128b0c441e91d",
+];
+
+/**
  * Detached starts still in flight, keyed by the full tenant scope the wake
  * asserts: `(scoped relay URL, expected signer, agent pubkey)`.
  *
@@ -144,6 +153,11 @@ export function useDetachedAgentStart(): (
     normalizePubkey(identityQuery.data?.pubkey ?? "") || undefined;
   return React.useCallback(
     (agent: ManagedAgent, replayFloorUnix?: number) => {
+      if (REMOTE_ONLY_AGENT_PUBKEYS.includes(normalizePubkey(agent.pubkey))) {
+        // No local wake for a remote-only agent: nothing to start, and no
+        // warning worth showing, since the message was already published.
+        return false;
+      }
       if (!expectedRelayUrl || !expectedSignerPubkey) {
         // Fail closed: an unscoped start resolves the relay and the signing
         // identity at execution time, so it can land on whichever tenant is

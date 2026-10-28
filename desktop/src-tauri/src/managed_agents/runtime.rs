@@ -469,6 +469,18 @@ pub(crate) fn spawn_with_effort_proof(
     cmd.spawn()
 }
 
+/// Agents whose harness runs on the remote backend only. Pinned by pubkey so
+/// the record, keys, chats, and memberships stay local while every local spawn
+/// path (mention, app launch, manual start, restore/retry) is refused.
+const REMOTE_ONLY_AGENT_PUBKEYS: &[&str] =
+    &["d2ce9939002896a70e05bcc4d2727589a6bc3abb3b944af0844128b0c441e91d"];
+
+fn local_launch_disabled(pubkey: &str) -> bool {
+    REMOTE_ONLY_AGENT_PUBKEYS
+        .iter()
+        .any(|remote_only| pubkey.eq_ignore_ascii_case(remote_only))
+}
+
 /// Spawn an agent process without holding any locks on records or runtimes.
 /// Returns the child process and log path on success. The caller is responsible
 /// for updating `ManagedAgentRecord` fields and inserting into the runtimes map.
@@ -490,6 +502,11 @@ pub fn spawn_agent_child<R: tauri::Runtime>(
     owner_hex: Option<&str>,
     replay_floor_unix: Option<u64>,
 ) -> Result<crate::managed_agents::ManagedAgentProcess, String> {
+    if local_launch_disabled(&record.pubkey) {
+        return Err(
+            "local launch is disabled for this agent; it runs on the remote backend".to_string(),
+        );
+    }
     admitted.covers(relay_url)?;
     if let Some(error) = spawn_key_refusal(record) {
         return Err(error);
@@ -966,3 +983,28 @@ mod test_fixtures;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod remote_only_launch_tests {
+    use super::local_launch_disabled;
+
+    const GROOSE: &str = "d2ce9939002896a70e05bcc4d2727589a6bc3abb3b944af0844128b0c441e91d";
+
+    #[test]
+    fn refuses_the_remote_only_agent() {
+        assert!(local_launch_disabled(GROOSE));
+    }
+
+    #[test]
+    fn refuses_the_remote_only_agent_case_insensitively() {
+        assert!(local_launch_disabled(&GROOSE.to_uppercase()));
+    }
+
+    #[test]
+    fn allows_every_other_agent() {
+        assert!(!local_launch_disabled(
+            "0fd661cfd5e2e042c7d664809c57361661973926d8c7bd681b9f7f11c6809caf"
+        ));
+        assert!(!local_launch_disabled(""));
+    }
+}
