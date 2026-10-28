@@ -63,9 +63,9 @@ void main() {
           expect(find.text("We couldn't prepare that photo."), findsOneWidget);
         }
         if (side == null) {
-          expect(find.bySemanticsLabel('Cancel'), findsOneWidget);
+          expect(find.bySemanticsLabel('Back'), findsOneWidget);
           expect(find.byType(IosNavigationBar), findsNothing);
-          await tester.tap(find.text('Cancel'));
+          await tester.tap(find.text('Back'));
         } else {
           // UIKit owns the rail's semantics; its native action payload must
           // have one cancel, with no competing Flutter cancel/back control.
