@@ -187,10 +187,10 @@ void main() {
               (_) => hideCompleted = true,
             );
         await tester.pump();
-        await tester.pump(const Duration(milliseconds: 100));
+        await tester.pump(const Duration(milliseconds: 50));
         expect(paintedWidth(), closeTo(220, 0.01));
         expect(hideCompleted, isFalse);
-        await tester.pump(const Duration(milliseconds: 100));
+        await tester.pump(const Duration(milliseconds: 50));
         await tester.pump(const Duration(milliseconds: 16));
         await tester.pump();
         expect(hideCompleted, isTrue);

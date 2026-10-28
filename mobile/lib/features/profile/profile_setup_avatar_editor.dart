@@ -62,6 +62,8 @@ class ProfileSetupAvatarEditor extends HookConsumerWidget {
     final transition = useAnimationController(
       initialValue: anchoredPreview == null ? 1 : 0,
       duration: const Duration(milliseconds: 200),
+      // The native profile reveal completes the second half of the return.
+      reverseDuration: const Duration(milliseconds: 100),
     );
     final VoidCallback? close = busy.value
         ? null

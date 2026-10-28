@@ -433,11 +433,11 @@ private final class NativeProfileSetupController: UIViewController, UITextFieldD
     notNow.accessibilityElementsHidden = visible
     let motion = visible && !UIAccessibility.isReduceMotionEnabled
     // Clear the heading quickly before the segmented control replaces it.
-    UIView.animate(withDuration: UIAccessibility.isReduceMotionEnabled ? 0 : (visible ? 0.06 : 0.2), delay: 0, options: [.beginFromCurrentState, .curveEaseOut]) {
+    UIView.animate(withDuration: UIAccessibility.isReduceMotionEnabled ? 0 : (visible ? 0.06 : 0.1), delay: 0, options: [.beginFromCurrentState, .curveEaseOut]) {
       self.heading.alpha = visible ? 0 : 1
       self.explanationRow.alpha = visible ? 0 : 1
     }
-    UIView.animate(withDuration: UIAccessibility.isReduceMotionEnabled ? 0 : 0.2, delay: 0, options: [.beginFromCurrentState, .curveEaseOut]) {
+    UIView.animate(withDuration: UIAccessibility.isReduceMotionEnabled ? 0 : (visible ? 0.2 : 0.1), delay: 0, options: [.beginFromCurrentState, .curveEaseOut]) {
       self.heading.transform = motion ? CGAffineTransform(translationX: 0, y: -24).scaledBy(x: 0.96, y: 0.96) : .identity
       self.explanationRow.transform = self.heading.transform
       self.submit.alpha = visible ? 0 : 1
