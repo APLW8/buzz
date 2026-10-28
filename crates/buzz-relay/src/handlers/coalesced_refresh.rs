@@ -76,7 +76,8 @@ where
                     break;
                 }
             }
-            release.key = None;
+            // Finished normally: rerun_or_release already freed the key.
+            release.key.take();
         });
     }
 
