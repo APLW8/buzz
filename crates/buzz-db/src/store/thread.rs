@@ -111,7 +111,8 @@ pub struct ThreadSummary {
     /// Timestamp of the most recent reply in the thread.
     pub last_reply_at: Option<DateTime<Utc>>,
     /// Up to 10 distinct reply authors, most recently active first, drawn
-    /// from the newest [`THREAD_PARTICIPANT_SCAN_LIMIT`] replies.
+    /// from the newest [`THREAD_PARTICIPANT_SCAN_LIMIT`] replies. Deleted
+    /// replies count toward that window but contribute no author.
     pub participants: Vec<Vec<u8>>,
 }
 

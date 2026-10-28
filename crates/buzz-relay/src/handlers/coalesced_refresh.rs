@@ -53,14 +53,14 @@ where
                 slot.insert(false);
             }
         }
-        let this = Arc::clone(self);
+        // Frees the key if the task panics or is cancelled, including before
+        // its first poll, so a failed refresh can't block the key forever.
+        let mut release = Release {
+            owner: Arc::clone(self),
+            key: Some(key.clone()),
+        };
         tokio::spawn(async move {
-            // Frees the key if the task panics or is cancelled, so a failed
-            // refresh can't block the key forever.
-            let mut release = Release {
-                pending: &this.pending,
-                key: Some(key.clone()),
-            };
+            let this = Arc::clone(&release.owner);
             loop {
                 if tokio::time::timeout(this.run_timeout, refresh())
                     .await
@@ -98,15 +98,15 @@ where
     }
 }
 
-struct Release<'a, K: Eq + Hash> {
-    pending: &'a DashMap<K, bool>,
+struct Release<K: Eq + Hash> {
+    owner: Arc<CoalescedRefresh<K>>,
     key: Option<K>,
 }
 
-impl<K: Eq + Hash> Drop for Release<'_, K> {
+impl<K: Eq + Hash> Drop for Release<K> {
     fn drop(&mut self) {
         if let Some(key) = self.key.take() {
-            self.pending.remove(&key);
+            self.owner.pending.remove(&key);
         }
     }
 }
@@ -164,6 +164,75 @@ mod tests {
             runs.load(Ordering::SeqCst),
             3,
             "a later request runs at once"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn request_during_a_run_gets_a_trailing_run_that_sees_its_state() {
+        let refresh = Arc::new(CoalescedRefresh::new(INTERVAL, TIMEOUT));
+        let state = Arc::new(AtomicUsize::new(1));
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        // Records the state it reads, then holds until the gate opens.
+        let reader = {
+            let (state, seen, gate) = (Arc::clone(&state), Arc::clone(&seen), Arc::clone(&gate));
+            move || {
+                let (state, seen, gate) =
+                    (Arc::clone(&state), Arc::clone(&seen), Arc::clone(&gate));
+                async move {
+                    seen.lock().unwrap().push(state.load(Ordering::SeqCst));
+                    let _permit = gate.acquire().await;
+                }
+            }
+        };
+
+        refresh.request("root", reader.clone());
+        settle().await;
+        assert_eq!(*seen.lock().unwrap(), [1], "the first run read state 1");
+
+        state.store(2, Ordering::SeqCst);
+        refresh.request("root", reader.clone());
+        settle().await;
+        assert_eq!(
+            *seen.lock().unwrap(),
+            [1],
+            "no second run while one is in flight"
+        );
+
+        gate.add_permits(1);
+        settle().await;
+        tokio::time::advance(INTERVAL).await;
+        settle().await;
+        assert_eq!(
+            *seen.lock().unwrap(),
+            [1, 2],
+            "the trailing run reads the state written mid-run"
+        );
+
+        tokio::time::advance(INTERVAL).await;
+        settle().await;
+        assert_eq!(*seen.lock().unwrap(), [1, 2], "no further run");
+        assert!(refresh.pending.is_empty(), "idle key is released");
+    }
+
+    #[test]
+    fn a_task_dropped_before_its_first_poll_releases_the_key() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        let refresh = Arc::new(CoalescedRefresh::new(INTERVAL, TIMEOUT));
+        let runs = Arc::new(AtomicUsize::new(0));
+        // `block_on` returns without yielding, so the spawned task is never
+        // polled; dropping the runtime drops it unpolled.
+        runtime.block_on(async { refresh.request("root", counting(&runs)) });
+        assert!(!refresh.pending.is_empty(), "the queued task holds the key");
+
+        drop(runtime);
+        assert_eq!(runs.load(Ordering::SeqCst), 0, "the task never ran");
+        assert!(
+            refresh.pending.is_empty(),
+            "an unpolled task must not wedge the key"
         );
     }
 
