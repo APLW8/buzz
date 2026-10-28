@@ -136,6 +136,7 @@ final class NativeProfileSetupCoordinator: NSObject, UIAdaptivePresentationContr
         return
       }
       if call.method == "controls", let state = call.arguments as? [String: Any] {
+        guard !finishing else { result(nil); return }
         self.editorCanDone = state["canDone"] as? Bool ?? false
         self.editorBusy = state["busy"] as? Bool ?? false
         let fullScreen = state["fullScreen"] as? Bool == true
