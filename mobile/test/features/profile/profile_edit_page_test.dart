@@ -578,13 +578,13 @@ void main() {
       findsOneWidget,
     );
     expect(find.byKey(const ValueKey('emoji-editor-emoji')), findsOneWidget);
-    final pickerSwitcher = tester.widget<AnimatedSwitcher>(
+    expect(
       find.descendant(
         of: find.byKey(const ValueKey('emoji-avatar-picker-content')),
         matching: find.byType(AnimatedSwitcher),
       ),
+      findsNothing,
     );
-    expect(pickerSwitcher.duration, const Duration(milliseconds: 140));
     final backgroundSurface = find.descendant(
       of: find.byKey(const ValueKey('emoji-editor-background')),
       matching: find.byType(AnimatedContainer),
