@@ -131,7 +131,9 @@ final class ProfileSetupRecoveryTests: XCTestCase {
         XCTAssertEqual(profile.navigationItem.rightBarButtonItem?.title, "Done")
         XCTAssertFalse(profile.navigationItem.rightBarButtonItem?.isEnabled ?? true)
         XCTAssertTrue(profile.navigationItem.leftBarButtonItem?.isEnabled ?? false)
-        XCTAssertTrue(profile.children.contains { $0 is FlutterViewController })
+        let editor = profile.children.compactMap { $0 as? FlutterViewController }.first
+        XCTAssertEqual(editor?.isViewOpaque, false, "Native chrome must remain visible through the exiting editor")
+        XCTAssertEqual(editor?.view.backgroundColor, UIColor.clear)
         XCTAssertFalse(pan.isEnabled)
         XCTAssertFalse(nav.interactivePopGestureRecognizer?.isEnabled ?? true)
         XCTAssertTrue(nav.isModalInPresentation)

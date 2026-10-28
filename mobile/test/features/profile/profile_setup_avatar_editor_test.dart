@@ -44,6 +44,24 @@ void main() {
       }
 
       await open(null);
+      final openingEditor = tester.widget<ProfileAvatarEditor>(
+        find.byType(ProfileAvatarEditor),
+      );
+      expect(openingEditor.mode, ProfileAvatarMode.emoji);
+      final openingDraft = openingEditor.draft! as ProfileUrlAvatarDraft;
+      expect(parseEmojiAvatarDataUrl(openingDraft.url)?.emoji, '😊');
+      expect(openingEditor.currentAvatarUrl, openingDraft.url);
+      await tester.tap(find.text('Done'));
+      await tester.pump();
+      expect(accepted, same(openingDraft));
+      await open(null);
+      await tester.tap(find.byTooltip('Back to profile'));
+      await tester.pump();
+      expect(
+        accepted,
+        isNull,
+        reason: 'Back does not accept the suggested emoji',
+      );
       tester
           .widget<ProfileAvatarEditor>(find.byType(ProfileAvatarEditor))
           .onModeChanged(ProfileAvatarMode.animated);
@@ -111,6 +129,10 @@ void main() {
       expect(previewRect!.width, greaterThan(0));
       expect(previewRect!.height, greaterThan(0));
       if (anchor != null) {
+        expect(
+          tester.widget<Scaffold>(find.byType(Scaffold)).backgroundColor,
+          Colors.transparent,
+        );
         expect(previewRect, anchor);
         final circle = tester.getRect(
           find.byKey(const ValueKey('avatar-preview-position')),
@@ -278,10 +300,10 @@ void main() {
               (_) => hideCompleted = true,
             );
         await tester.pump();
-        await tester.pump(const Duration(milliseconds: 50));
+        await tester.pump(const Duration(milliseconds: 100));
         expect(paintedWidth(), closeTo(220, 0.01));
         expect(hideCompleted, isFalse);
-        await tester.pump(const Duration(milliseconds: 50));
+        await tester.pump(const Duration(milliseconds: 100));
         await tester.pump(const Duration(milliseconds: 16));
         await tester.pump();
         expect(hideCompleted, isTrue);

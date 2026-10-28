@@ -152,9 +152,12 @@ final class NativeProfileSetupCoordinator: NSObject, UIAdaptivePresentationContr
       let draft = call.arguments as? [String: Any]
       func returnToProfile() {
         controller.navigationItem.setRightBarButton(nil, animated: false)
-        // Keep the profile heading hidden until the editor has left. Restoring
-        // it here exposes it behind the exiting segmented control and starts
-        // its return animation twice; restoreProfilePage owns that transition.
+        // Restore the native chrome alongside Flutter's exit. The transparent
+        // editor reveals it during the animation; the final handoff must not
+        // restart it or allow another navigation action mid-transition.
+        controller.view.isUserInteractionEnabled = false
+        controller.navigationItem.leftBarButtonItem?.isEnabled = false
+        controller.setEditorVisible(false)
         let frame = controller.editorFrame
         let rect = controller.avatarFrame(in: controller.view).offsetBy(dx: -frame.minX, dy: -frame.minY)
         // Keep the moving avatar opaque until Flutter has drawn its final
@@ -182,7 +185,8 @@ final class NativeProfileSetupCoordinator: NSObject, UIAdaptivePresentationContr
     let editor = FlutterViewController(engine: engine, nibName: nil, bundle: nil)
     avatarController = editor
     engine.registrar(forPlugin: "BuzzIosNavigationBar")?.register(IosNavigationBarFactory(messenger: messenger, parent: editor), withId: "buzz/ios_navigation_bar")
-    editor.view.backgroundColor = controller.view.backgroundColor
+    editor.isViewOpaque = false
+    editor.view.backgroundColor = .clear
     controller.addChild(editor)
     editor.view.frame = editorFrame
     editor.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -231,6 +235,8 @@ final class NativeProfileSetupCoordinator: NSObject, UIAdaptivePresentationContr
     if let enabled = previousInteractivePopEnabled { navigation?.interactivePopGestureRecognizer?.isEnabled = enabled }
     previousInteractivePopEnabled = nil
     disabledSheetPans.forEach { $0.isEnabled = true }; disabledSheetPans.removeAll()
+    controller?.view.isUserInteractionEnabled = true
+    controller?.navigationItem.leftBarButtonItem?.isEnabled = true
     controller?.setEditorVisible(false)
     controller?.setAvatarHidden(false)
     controller?.avatarReady()
@@ -424,6 +430,7 @@ private final class NativeProfileSetupController: UIViewController, UITextFieldD
     return CGRect(x: 0, y: top, width: view.bounds.width, height: max(0, view.safeAreaLayoutGuide.layoutFrame.maxY - top))
   }
   func setEditorVisible(_ visible: Bool) {
+    guard editingAvatar != visible else { return }
     editingAvatar = visible
     heading.accessibilityElementsHidden = visible
     explanationRow.accessibilityElementsHidden = visible
@@ -433,11 +440,11 @@ private final class NativeProfileSetupController: UIViewController, UITextFieldD
     notNow.accessibilityElementsHidden = visible
     let motion = visible && !UIAccessibility.isReduceMotionEnabled
     // Clear the heading quickly before the segmented control replaces it.
-    UIView.animate(withDuration: UIAccessibility.isReduceMotionEnabled ? 0 : (visible ? 0.06 : 0.1), delay: 0, options: [.beginFromCurrentState, .curveEaseOut]) {
+    UIView.animate(withDuration: UIAccessibility.isReduceMotionEnabled ? 0 : (visible ? 0.06 : 0.2), delay: 0, options: [.beginFromCurrentState, .curveEaseOut]) {
       self.heading.alpha = visible ? 0 : 1
       self.explanationRow.alpha = visible ? 0 : 1
     }
-    UIView.animate(withDuration: UIAccessibility.isReduceMotionEnabled ? 0 : (visible ? 0.2 : 0.1), delay: 0, options: [.beginFromCurrentState, .curveEaseOut]) {
+    UIView.animate(withDuration: UIAccessibility.isReduceMotionEnabled ? 0 : 0.2, delay: 0, options: [.beginFromCurrentState, .curveEaseOut]) {
       self.heading.transform = motion ? CGAffineTransform(translationX: 0, y: -24).scaledBy(x: 0.96, y: 0.96) : .identity
       self.explanationRow.transform = self.heading.transform
       self.submit.alpha = visible ? 0 : 1
