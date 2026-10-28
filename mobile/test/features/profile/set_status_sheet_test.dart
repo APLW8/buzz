@@ -85,6 +85,84 @@ void main() {
     },
   );
 
+  for (final invalidExpiration in <Object?>[
+    9_000_000_000_000,
+    -9_000_000_000_000,
+    double.nan,
+    double.infinity,
+    'tomorrow',
+    null,
+  ]) {
+    testWidgets('iOS recovers from invalid expiration $invalidExpiration', (
+      tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      const channel = MethodChannel('buzz/profile_text_editor');
+      final calls = <Map<dynamic, dynamic>>[];
+      final notifier = _RecordingUserStatusNotifier();
+      final expiration = DateTime.now().add(const Duration(days: 1));
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            expect(call.method, 'presentStatus');
+            final draft = call.arguments as Map<dynamic, dynamic>;
+            calls.add(draft);
+            // Bound the mock so a regression reports a failure, not a hang.
+            if (calls.length > 2) return null;
+            expect(draft['duration'], 86400);
+            expect(draft['expiresAt'], isNull);
+            if (calls.length == 2) {
+              expect(draft['text'], 'Edited');
+              expect(draft['emoji'], '🎯');
+              expect(draft['saveError'], true);
+              expect(notifier.savedText, isNull);
+            }
+            return {
+              'text': 'Edited',
+              'emoji': '🎯',
+              'duration': calls.length == 1 ? 0 : draft['duration'],
+              'expiresAt': calls.length == 1
+                  ? invalidExpiration
+                  : expiration.millisecondsSinceEpoch / 1000,
+            };
+          });
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, null),
+      );
+      await tester.pumpWidget(
+        WidgetHelpers.testable(
+          overrides: [userStatusProvider.overrideWith(() => notifier)],
+          child: Builder(
+            builder: (context) => FilledButton(
+              onPressed: () => showSetStatusSheet(
+                context,
+                currentStatus: const UserStatus(
+                  text: 'Old',
+                  emoji: '',
+                  updatedAt: 1,
+                  expiresAt: 9_000_000_000_000,
+                ),
+              ),
+              child: const Text('Open'),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(calls, hasLength(2));
+      expect(notifier.savedText, 'Edited');
+      expect(notifier.savedEmoji, '🎯');
+      expect(
+        notifier.savedExpiresAt?.millisecondsSinceEpoch,
+        expiration.millisecondsSinceEpoch,
+      );
+      debugDefaultTargetPlatformOverride = null;
+    });
+  }
+
   testWidgets('keeps its resting top edge when the keyboard appears', (
     tester,
   ) async {

@@ -85,11 +85,14 @@ Future<void> _showNativeStatusEditor(
   final container = ProviderScope.containerOf(context, listen: false);
   final notifier = container.read(userStatusProvider.notifier);
   final sheetTheme = utilitySurfaceThemeData(Theme.of(context));
+  final currentExpiration = currentStatus?.expirationDateTime;
   var draft = <String, dynamic>{
     'text': currentStatus?.text ?? '',
     'emoji': currentStatus?.emoji ?? '',
-    'duration': currentStatus?.expiresAt == null ? 86400 : 0,
-    'expiresAt': currentStatus?.expiresAt,
+    'duration': currentExpiration == null ? 86400 : 0,
+    'expiresAt': currentExpiration == null
+        ? null
+        : currentExpiration.millisecondsSinceEpoch / 1000,
     'hasExistingStatus': currentStatus != null && !currentStatus.isEmpty,
     'brightness': sheetTheme.brightness.name,
     'pageBackgroundArgb': sheetTheme.colorScheme.surface.toARGB32(),
@@ -121,6 +124,19 @@ Future<void> _showNativeStatusEditor(
         draft,
       );
       if (value == null) return;
+      final expiration = _nativeStatusExpiration(value['expiresAt']);
+      if (value['clear'] != true && expiration == null) {
+        // Preserve the edit, but replace the invalid date with the default preset
+        // so pressing Set again can recover without resubmitting the bad value.
+        draft = {
+          ...draft,
+          ...value,
+          'duration': 86400,
+          'expiresAt': null,
+          'saveError': true,
+        };
+        continue;
+      }
       try {
         if (value['clear'] == true) {
           await notifier.clearStatus();
@@ -128,9 +144,7 @@ Future<void> _showNativeStatusEditor(
           await notifier.setStatus(
             value['text'] as String,
             value['emoji'] as String,
-            expiresAt: DateTime.fromMillisecondsSinceEpoch(
-              ((value['expiresAt'] as num) * 1000).round(),
-            ),
+            expiresAt: expiration,
           );
         }
         return;
@@ -143,6 +157,17 @@ Future<void> _showNativeStatusEditor(
   } finally {
     channel.setMethodCallHandler(null);
   }
+}
+
+DateTime? _nativeStatusExpiration(Object? value) {
+  // Validate before multiplying or rounding untrusted method-channel input.
+  if (value is! num ||
+      !value.isFinite ||
+      value < -8640000000000 ||
+      value > 8640000000000) {
+    return null;
+  }
+  return DateTime.fromMillisecondsSinceEpoch((value * 1000).round());
 }
 
 class _SetStatusSheet extends HookConsumerWidget {
