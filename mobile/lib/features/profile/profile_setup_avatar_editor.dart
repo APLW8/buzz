@@ -70,6 +70,7 @@ class ProfileSetupAvatarEditor extends HookConsumerWidget {
     });
     final prepare = useState<Future<ProfileAvatarDraft?> Function()?>(null);
     final busy = useState(false);
+    final returningToEmpty = useState(false);
     final error = useState(false);
     final transition = useAnimationController(
       initialValue: anchoredPreview == null ? 1 : 0,
@@ -79,6 +80,7 @@ class ProfileSetupAvatarEditor extends HookConsumerWidget {
         ? null
         : () {
             if (onFinished != null) {
+              returningToEmpty.value = initialDraft == null;
               onFinished!(null);
             } else {
               Navigator.of(context).pop();
@@ -197,6 +199,7 @@ class ProfileSetupAvatarEditor extends HookConsumerWidget {
                         : null,
                     fallbackInitial: '+',
                     emptyPreview: const ProfileSetupEmptyAvatar(),
+                    returningToEmpty: returningToEmpty.value,
                     draft: draft.value,
                     mode: mode.value,
                     transition: transition,

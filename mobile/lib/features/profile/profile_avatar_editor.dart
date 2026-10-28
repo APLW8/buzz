@@ -88,6 +88,7 @@ class ProfileAvatarEditor extends HookConsumerWidget {
     this.previewKey,
     this.previewOpacity = 1,
     this.emptyPreview,
+    this.returningToEmpty = false,
     this.headerGap = Grid.xs,
     this.anchoredPreview,
   });
@@ -98,6 +99,9 @@ class ProfileAvatarEditor extends HookConsumerWidget {
   final GlobalKey? previewKey;
   final double previewOpacity;
   final Widget? emptyPreview;
+
+  /// Crossfades a discarded setup draft to its original empty placeholder.
+  final bool returningToEmpty;
   final double headerGap;
 
   /// Keeps the onboarding avatar in place while its controls appear.
@@ -580,7 +584,8 @@ class ProfileAvatarEditor extends HookConsumerWidget {
                 ),
               ),
             ),
-            if (fixedPreview != null && !isCapturingImage.value)
+            if ((fixedPreview != null || returningToEmpty) &&
+                !isCapturingImage.value)
               AnimatedPositioned(
                 key: const ValueKey('avatar-preview-position'),
                 curve: Curves.easeOutCubic,
@@ -600,12 +605,44 @@ class ProfileAvatarEditor extends HookConsumerWidget {
                     child: Opacity(
                       opacity: previewOpacity,
                       child: KeyedSubtree(
-                        key: previewKey,
+                        key: mode == ProfileAvatarMode.animated
+                            ? null
+                            : previewKey,
                         child: anchoredPreview == null
-                            ? fixedPreview
+                            ? fixedPreview ?? const SizedBox.shrink()
                             : SizedBox.square(
                                 dimension: anchoredPreview.width,
-                                child: FittedBox(child: fixedPreview),
+                                child: AnimatedBuilder(
+                                  animation: transition,
+                                  builder: (context, _) => FittedBox(
+                                    child: SizedBox.square(
+                                      dimension: _previewSize,
+                                      child: Stack(
+                                        fit: StackFit.expand,
+                                        children: [
+                                          if (returningToEmpty)
+                                            Opacity(
+                                              key: const ValueKey(
+                                                'avatar-return-empty-opacity',
+                                              ),
+                                              opacity: 1 - transition.value,
+                                              child: emptyPreview,
+                                            ),
+                                          if (fixedPreview != null)
+                                            Opacity(
+                                              key: const ValueKey(
+                                                'avatar-return-draft-opacity',
+                                              ),
+                                              opacity: returningToEmpty
+                                                  ? transition.value
+                                                  : 1,
+                                              child: fixedPreview,
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ),
                               ),
                       ),
                     ),

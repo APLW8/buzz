@@ -97,6 +97,72 @@ void main() {
     },
   );
 
+  testWidgets('discarding a new avatar crossfades to the empty circle', (
+    tester,
+  ) async {
+    for (final mode in ProfileAvatarMode.values) {
+      await tester.pumpWidget(
+        ProviderScope(
+          child: MaterialApp(
+            home: ProfileSetupAvatarEditor(
+              key: UniqueKey(),
+              anchoredPreview: const Rect.fromLTWH(306.5, 236.5, 187, 187),
+              onFinished: (draft) => expect(draft, isNull),
+            ),
+          ),
+        ),
+      );
+      Future<void> send(String method) =>
+          tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+            'buzz/profile_avatar_sheet',
+            const StandardMethodCodec().encodeMethodCall(MethodCall(method)),
+            (_) {},
+          );
+      await tester.pump();
+      await send('reveal');
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+      await tester.tap(
+        find.text(switch (mode) {
+          ProfileAvatarMode.image => 'Image',
+          ProfileAvatarMode.emoji => 'Emoji',
+          ProfileAvatarMode.animated => 'Animated',
+        }).first,
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+      await send('back');
+      await tester.pump();
+      double emptyOpacity() => tester
+          .widget<Opacity>(
+            find.byKey(const ValueKey('avatar-return-empty-opacity')),
+          )
+          .opacity;
+      expect(emptyOpacity(), 0);
+      final hiding = send('hide');
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(emptyOpacity(), closeTo(0.5, 0.01));
+      if (mode != ProfileAvatarMode.animated) {
+        expect(
+          tester
+              .widget<Opacity>(
+                find.byKey(const ValueKey('avatar-return-draft-opacity')),
+              )
+              .opacity,
+          closeTo(0.5, 0.01),
+        );
+      }
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 16));
+      await tester.pump();
+      await hiding;
+      expect(emptyOpacity(), 1);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    }
+  });
+
   testWidgets('avatar draft editor lays out within a full height sheet', (
     tester,
   ) async {
